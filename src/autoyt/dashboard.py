@@ -95,7 +95,7 @@ class Dashboard:
         try:
             runner = Pipeline(self.cfg)
             result = runner.retry(job_id) if action == "retry" else runner.create_run(dry_run=action == "preview")
-            self.notice = "Run finished; see its result below." if result else "Daily attempt limit reached; no new run started."
+            self.notice = "Run finished; see its result below." if result else "No new run started; check the saved job state."
         except Exception as error:
             self.notice = f"Run stopped ({type(error).__name__}). Check the job and run doctor."
 

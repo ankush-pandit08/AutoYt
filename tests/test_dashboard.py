@@ -17,8 +17,9 @@ def test_ten_slots_and_transactional_limit(cfg):
     scheduler = configure(BackgroundScheduler(), settings)
     assert len(scheduler.get_jobs()) == 10
     app = Dashboard(cfg)
-    assert all(app.store.create(limit=10) for _ in range(10))
-    assert app.store.create(limit=10) is None
+    assert all(app.store.create(slot=f"2026-10-18T{i:02}:00", limit=10) for i in range(10))
+    assert app.store.create(slot="2026-10-18T11:00", limit=10) is None
+    assert app.store.create(limit=10)  # Run button jobs have no slot or daily app cap.
     app.close()
 
 

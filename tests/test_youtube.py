@@ -112,12 +112,14 @@ def test_cc_by_credits_required_at_upload(ready, script, monkeypatch):
 def test_old_job_retry_cannot_exceed_daily_upload_cap(ready, monkeypatch):
     cfg, store, job_id, folder = ready
     for index in range(cfg.max_videos_per_day):
-        previous = store.create(dry_run=True)
+        previous = store.create(dry_run=True, slot=f"2026-10-18T{index:02}:00")
         store.confirm_upload(previous, f"previous-{index}", "public")
+    with store.connect() as db:
+        db.execute("UPDATE video_jobs SET slot=? WHERE id=?", ("2026-10-18T23:00", job_id))
     def forbidden(*args):
-        pytest.fail("Daily cap must stop a new upload before network access")
+        pytest.fail("Daily cap must stop a new scheduled upload before network access")
     monkeypatch.setattr(youtube, "service", forbidden)
-    with pytest.raises(RuntimeError, match="daily upload limit"):
+    with pytest.raises(RuntimeError, match="daily scheduled upload limit"):
         youtube.upload(cfg, store, job_id, folder)
 
 
@@ -316,3 +318,26 @@ def test_reconcile_empty_description_by_tag():
             {"id": "replacement", "snippet": {"tags": ["AutoYT-job-job-123"]}}]})))
     channel = {"contentDetails": {"relatedPlaylists": {"uploads": "uploads-playlist"}}}
     assert youtube.reconcile(api, channel, "job-123") == "replacement"
+
+
+def test_manual_upload_allowed_after_scheduled_cap(ready, monkeypatch):
+    cfg, store, job_id, folder = ready
+    for index in range(cfg.max_videos_per_day):
+        previous = store.create(dry_run=True, slot=f"2026-10-18T{index:02}:00")
+        store.confirm_upload(previous, f"scheduled-{index}", "public")
+    assert store.daily_upload_count(cfg.timezone, scheduled_only=True) == cfg.max_videos_per_day
+    install_fake(monkeypatch, FakeYouTube(UploadRequest()))
+    assert youtube.upload(cfg, store, job_id, folder) == "video-123"
+    assert store.daily_upload_count(cfg.timezone, scheduled_only=True) == cfg.max_videos_per_day
+
+
+def test_manual_uploads_do_not_consume_scheduled_allowance(ready, monkeypatch):
+    cfg, store, job_id, folder = ready
+    for index in range(cfg.max_videos_per_day):
+        previous = store.create(dry_run=True)
+        store.confirm_upload(previous, f"manual-{index}", "public")
+    with store.connect() as db:
+        db.execute("UPDATE video_jobs SET slot=? WHERE id=?", ("2026-10-18T23:00", job_id))
+    assert store.daily_upload_count(cfg.timezone, scheduled_only=True) == 0
+    install_fake(monkeypatch, FakeYouTube(UploadRequest()))
+    assert youtube.upload(cfg, store, job_id, folder) == "video-123"

@@ -89,8 +89,8 @@ class Store:
             if slot and db.execute("SELECT 1 FROM scheduled_runs WHERE slot=?", (slot,)).fetchone():
                 return None
             count = sum(datetime.fromisoformat(r[0]).astimezone(zone).date() == today
-                        for r in db.execute("SELECT created_at FROM video_jobs WHERE dry_run=0"))
-            if not dry_run and count >= limit:
+                        for r in db.execute("SELECT created_at FROM video_jobs WHERE dry_run=0 AND slot IS NOT NULL"))
+            if slot and not dry_run and count >= limit:
                 return None
             db.execute("INSERT INTO video_jobs(id,created_at,updated_at,state,dry_run,topic,slot) "
                        "VALUES(?,?,?,'CREATED',?,?,?)", (job_id, now(), now(), dry_run, topic, slot))
@@ -185,10 +185,13 @@ class Store:
             db.execute("INSERT OR IGNORE INTO youtube_uploads VALUES(?,?,?,?)",
                        (job_id, video_id, privacy, now()))
 
-    def daily_upload_count(self, tz):
+    def daily_upload_count(self, tz, scheduled_only=False):
         from zoneinfo import ZoneInfo
         zone = ZoneInfo(tz)
         today = datetime.now(zone).date()
         with self.connect() as db:
+            query = "SELECT u.uploaded_at FROM youtube_uploads u JOIN video_jobs j ON j.id=u.job_id"
+            if scheduled_only:
+                query += " WHERE j.slot IS NOT NULL"
             return sum(datetime.fromisoformat(row[0]).astimezone(zone).date() == today
-                       for row in db.execute("SELECT uploaded_at FROM youtube_uploads"))
+                       for row in db.execute(query))

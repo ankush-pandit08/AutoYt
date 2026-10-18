@@ -36,13 +36,13 @@ function render() {
   $('offline').hidden = true;
   $('autoBadge').textContent = s.auto_enabled ? 'ON' : 'PAUSED';
   $('autoBadge').className = `badge ${s.auto_enabled ? 'success' : 'neutral'}`;
-  $('autoDescription').textContent = `${cfg.slots.length} daily slots · Up to ${s.daily.limit} attempts/day · ${cfg.visibility} uploads ${cfg.uploads_enabled ? 'enabled' : 'disabled'}`;
+  $('autoDescription').textContent = `${cfg.slots.length} daily slots · Up to ${s.daily.limit} automatic attempts/day · ${cfg.visibility} uploads ${cfg.uploads_enabled ? 'enabled' : 'disabled'}`;
   $('toggle').textContent = s.auto_enabled ? 'Pause auto mode' : 'Resume auto mode';
   $('toggle').disabled = !token;
   $('run').textContent = cfg.uploads_enabled ? `＋ Run now · ${cfg.visibility}` : '＋ Run now';
   $('run').disabled = $('preview').disabled = s.busy || !token;
   $('uploaded').textContent = s.daily.uploaded;
-  $('target').textContent = `Up to ${s.daily.limit} / day · quality checks apply`;
+  $('target').textContent = `Auto: up to ${s.daily.limit}/day · manual runs have no app limit`;
   $('attempts').textContent = s.daily.attempts;
   $('failed').textContent = s.daily.failed;
   $('next').textContent = s.next_run ? time(s.next_run) : 'Paused';
@@ -92,7 +92,7 @@ function confirmAction(name, job_id) {
   pending = {name,job_id};
   const preview = name === 'preview';
   $('confirmTitle').textContent = preview ? 'Generate a preview?' : name === 'retry' ? 'Retry this failed run?' : 'Start a new run?';
-  $('confirmText').textContent = preview ? 'Runs the full local pipeline without uploading. This can take several minutes.' : name === 'retry' ? 'Resumes saved progress and keeps the visibility recorded for this job. If it passes every check, a live job can upload to YouTube.' : `Finds a fresh tech story and runs the full pipeline. ${state.settings.uploads_enabled ? `If it passes every check, the video uploads ${state.settings.visibility === 'public' ? 'PUBLICLY' : 'privately'} to your pinned YouTube channel.` : 'Uploads are currently disabled.'} This counts toward today’s attempt limit.`;
+  $('confirmText').textContent = preview ? 'Runs the full local pipeline without uploading. This can take several minutes.' : name === 'retry' ? 'Resumes saved progress and keeps the visibility recorded for this job. If it passes every check, a live job can upload to YouTube.' : `Finds a fresh tech story and runs the full pipeline. ${state.settings.uploads_enabled ? `If it passes every check, the video uploads ${state.settings.visibility === 'public' ? 'PUBLICLY' : 'privately'} to your pinned YouTube channel.` : 'Uploads are currently disabled.'} Manual runs have no app daily limit. Provider quotas and quality checks still apply.`;
   $('confirmAction').textContent = preview ? 'Generate preview' : name === 'retry' ? 'Retry run' : 'Start run';
   $('confirm').showModal();
 }

@@ -174,8 +174,9 @@ def upload(cfg, store, job_id, folder):
             raise ValueError("CC BY media requires creator, source and license credits in the upload description")
     store.save(job_id, "media_license_audit", license_audit)
     attempt = store.attempt(job_id)
-    if not attempt and store.daily_upload_count(cfg.timezone) >= cfg.max_videos_per_day:
-        raise RuntimeError("CONFIGURATION: daily upload limit reached; retry this saved job another day")
+    if job["slot"] and not attempt and store.daily_upload_count(
+            cfg.timezone, scheduled_only=True) >= cfg.max_videos_per_day:
+        raise RuntimeError("CONFIGURATION: daily scheduled upload limit reached; retry this saved job another day")
     youtube, channel = service(cfg)
     if attempt and attempt["video_id"]:
         return confirm(youtube, store, job_id, attempt["video_id"])

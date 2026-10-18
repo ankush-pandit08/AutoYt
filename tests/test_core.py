@@ -60,9 +60,10 @@ def test_job_limits_and_slots(cfg):
     first = db.create(slot="2026-10-18T08:00")
     assert first
     assert db.create(slot="2026-10-18T08:00") is None
-    assert db.create()
-    assert db.create()
-    assert db.create() is None
+    assert db.create(slot="2026-10-18T09:00")
+    assert db.create(slot="2026-10-18T10:00")
+    assert db.create(slot="2026-10-18T11:00") is None
+    assert all(db.create() for _ in range(12))
     assert db.create(dry_run=True)
 
 
