@@ -27,7 +27,7 @@ def test_valid_rss():
     assert 0 <= topics[0].score <= 1
 
 
-@pytest.mark.parametrize("xml", [rss("Celebrity gossip"), rss(age=25), rss(age=-1), rss(date=False),
+@pytest.mark.parametrize("xml", [rss("Celebrity gossip"), rss(age=169), rss(age=-1), rss(date=False),
                                   rss("Google AI rumor"), "<rss><channel></channel></rss>"])
 def test_reject_candidates(xml):
     assert parse_feed(xml, "test") == []
@@ -40,6 +40,11 @@ def test_bad_rss():
 
 def test_rank():
     assert parse_feed(rss(age=1), "test")[0].score > parse_feed(rss(age=20), "test")[0].score
+
+
+@pytest.mark.parametrize("age", [25, 72, 167])
+def test_accept_verified_week_window_candidates(age):
+    assert len(parse_feed(rss(age=age), "test")) == 1
 
 
 def test_dedupe():

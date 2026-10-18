@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from autoyt.models import Topic
 from autoyt.pipeline import Pipeline
 from autoyt.store import Store
@@ -44,3 +46,21 @@ def test_new_run_skips_rejected_stories_but_explicit_retry_rechecks(cfg, monkeyp
     pipeline.retry(first)
     assert len(checked) > 2
     assert checked[2] == candidates[-1].title
+
+
+@pytest.mark.parametrize("age_days,expected_checks", [(3, 1), (6.9, 1), (7.1, 0)])
+def test_pipeline_research_uses_seven_day_window(cfg, monkeypatch, age_days, expected_checks):
+    candidate = Topic(title="Google Pixel satellite messaging launches", url="https://example.com/pixel",
+                      source="test", published_at=datetime.now(timezone.utc)-timedelta(days=age_days))
+    monkeypatch.setattr("autoyt.pipeline.discovery.discover", lambda *args: [candidate])
+    checked = []
+
+    def reject(*args):
+        checked.append(True)
+        raise ValueError("Evidence incomplete")
+
+    monkeypatch.setattr("autoyt.pipeline.research.research", reject)
+    pipeline = Pipeline(cfg)
+    job = pipeline.create_run()
+    assert pipeline.store.get(job)["state"] == "FAILED"
+    assert len(checked) == expected_checks

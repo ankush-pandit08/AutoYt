@@ -142,6 +142,21 @@ def test_extraction_and_date_conflict(cfg):
         extract("https://blog.google/test", html, cfg, datetime.now(timezone.utc)-timedelta(days=4))
 
 
+@pytest.mark.parametrize("age_days,accepted", [(3, True), (6.9, True), (7.1, False), (-1, False)])
+def test_source_seven_day_window(cfg, monkeypatch, age_days, accepted):
+    from types import SimpleNamespace
+
+    date = datetime.now(timezone.utc)-timedelta(days=age_days)
+    doc = SimpleNamespace(title="Google software update", date=date.isoformat(),
+                          text="Google introduced new software controls. " * 30)
+    monkeypatch.setattr("autoyt.research.trafilatura.bare_extraction", lambda *args, **kwargs: doc)
+    if accepted:
+        assert extract("https://blog.google/test", "html", cfg).published_at == date
+    else:
+        with pytest.raises(ValueError, match="Stale or future"):
+            extract("https://blog.google/test", "html", cfg)
+
+
 def test_updated_vendor_advisory_preserves_publication_date(cfg, monkeypatch):
     from types import SimpleNamespace
     current = datetime.now(timezone.utc)

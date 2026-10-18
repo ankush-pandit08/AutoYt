@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import time
+from datetime import datetime, timezone
 
 import httpx
 from pydantic import BaseModel, Field, create_model
@@ -329,6 +330,8 @@ def generate(cfg, llm, topic, research, duration_feedback=None, reviewed_draft=N
             "Titles should create honest curiosity and name the subject. No generic filler, fake urgency, "
             "invented statistics, exaggerated certainty, guaranteed outcomes or clickbait promises. "
             "Keep claims within their explicit wording. Clearly distinguish interpretation and advice from reported facts. "
+            "Stories may be up to seven days old. Respect the supplied publication dates and current date; "
+            "do not describe older news as happening today, just announced, or breaking. "
             "Do not infer that the incident is LIMITED TO or affects ONLY named identities, products, "
             "services or users. Naming one affected component does not establish the full extent. "
             "Maintain a calm, factual tone. "
@@ -339,6 +342,8 @@ def generate(cfg, llm, topic, research, duration_feedback=None, reviewed_draft=N
             "If it requests visual_queries, write six relevant English stock-footage searches with varied "
             "concrete imagery, avoiding brand names and claims that stock depicts the actual event.",
             {"topic_context": topic.title,
+             "current_date_utc": datetime.now(timezone.utc).date().isoformat(),
+             "source_publication_dates": [s.published_at.isoformat() for s in research.sources],
              "context_rule": "Topic title identifies the subject; only verified_claims establish factual assertions.",
              "verified_claims": [{"text": c.claim, "attribution": c.attribution} for c in research.claims],
              "allowed_numerals": sorted(set(re.findall(r"\b\d+(?:[.,]\d+)*\b", " ".join(

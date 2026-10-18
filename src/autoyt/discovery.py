@@ -12,6 +12,7 @@ import feedparser
 from .models import Topic
 
 log = logging.getLogger(__name__)
+MAX_STORY_AGE_SECONDS = 7 * 24 * 60 * 60
 TECH = {"ai", "artificial", "intelligence", "software", "processor", "chip", "chips", "laptop",
         "computer", "google", "microsoft", "openai", "apple", "android", "ios", "robot", "robotics",
         "cybersecurity", "security", "smartphone", "iphone", "samsung", "technology", "nvidia",
@@ -70,7 +71,7 @@ def parse_feed(xml, source, now=None):
             continue
         date = datetime(*parsed[:6], tzinfo=timezone.utc)
         age = (now - date).total_seconds() / 3600
-        if not 0 <= age <= 24 or not words(entry.title) & TECH:
+        if not 0 <= age <= MAX_STORY_AGE_SECONDS / 3600 or not words(entry.title) & TECH:
             continue
         if re.search(r"\brumou?r|unconfirmed|reportedly", entry.title, re.I):
             continue
@@ -84,7 +85,8 @@ def parse_feed(xml, source, now=None):
         relevance = min(1, len(words(entry.title) & TECH) / 3)
         strength = min(1, math.log10(max(1, volume)) / 6) if volume else None
         # Missing metrics are excluded; known weights are renormalized. Interest is a niche proxy.
-        components = [(max(0, 1-age/24), .25), (relevance, .25), (relevance, .20)]
+        components = [(max(0, 1-age/(MAX_STORY_AGE_SECONDS / 3600)), .25),
+                      (relevance, .25), (relevance, .20)]
         if strength is not None:
             components.append((strength, .30))
         topic.score = sum(v*w for v, w in components) / sum(w for _, w in components)

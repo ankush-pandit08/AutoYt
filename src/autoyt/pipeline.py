@@ -145,8 +145,9 @@ class Pipeline:
                     previous = [title for title in previous if title != selected.title]
                     failures = []
                     for candidate in choices[:12]:
-                        if not 0 <= (datetime.now(timezone.utc)-candidate.published_at).total_seconds() <= 86400:
-                            failures.append({"topic": candidate.title, "reason": "Discovery story is no longer within 24 hours"})
+                        age = (datetime.now(timezone.utc)-candidate.published_at).total_seconds()
+                        if not 0 <= age <= discovery.MAX_STORY_AGE_SECONDS:
+                            failures.append({"topic": candidate.title, "reason": "Discovery story is no longer within seven days"})
                             self._save(job_id, folder, "research_attempts", failures)
                             continue
                         if discovery.duplicate(candidate.title, previous):

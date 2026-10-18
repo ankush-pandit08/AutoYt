@@ -12,7 +12,7 @@ import trafilatura
 from pydantic import BaseModel, Field, create_model
 from tld import get_fld
 
-from .discovery import similarity, words
+from .discovery import MAX_STORY_AGE_SECONDS, similarity, words
 from .models import Claim, Evidence, Research, Source
 from .store import write_json
 
@@ -72,7 +72,7 @@ def extract(url, html, cfg, date_hint=None):
         if match:
             updated = datetime.strptime(match.group(1), "%B %d, %Y").replace(tzinfo=timezone.utc)
     effective_date = updated or date
-    if date > current or effective_date > current or (current-effective_date).days > 7:
+    if date > current or not 0 <= (current-effective_date).total_seconds() <= MAX_STORY_AGE_SECONDS:
         raise ValueError("Stale or future source date")
     if date_hint and abs((date - date_hint).total_seconds()) > 86400 * 2:
         raise ValueError("Conflicting publication dates")
