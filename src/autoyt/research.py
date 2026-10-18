@@ -323,9 +323,14 @@ def verify_claims(claims, sources):
             raise ValueError("Each claim needs primary and independent corroboration")
 
 
+def publication_hint(topic):
+    # A Trends timestamp dates search interest, not publication of its linked news article.
+    return None if urlsplit(getattr(topic, "source", "")).hostname == "trends.google.com" else topic.published_at
+
+
 def research(cfg, web, llm, topic, candidates, folder=None):
-    urls = [(topic.url, topic.published_at), *[(u, None) for u in topic.related_urls]]
-    urls.extend((t.url, t.published_at) for t in candidates
+    urls = [(topic.url, publication_hint(topic)), *[(u, None) for u in topic.related_urls if u != topic.url]]
+    urls.extend((t.url, publication_hint(t)) for t in candidates
                 if t.url != topic.url and similarity(topic.title, t.title) >= .35)
     sources, seen = [], set()
     retrievals = []
