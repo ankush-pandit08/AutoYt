@@ -1,0 +1,71 @@
+{
+  "topic": "Local render test: understanding your computer",
+  "title": "How Your Computer Gets Work Done",
+  "hook": "Your computer turns instructions into actions, and the processor is where much of that work gets done.",
+  "script": "Your computer turns instructions into actions, and the processor is where much of that work gets done. Think of software as a set of directions, with each instruction contributing to a larger useful task. Memory holds information that running programs need, giving the processor a place to access their working data. Storage keeps files available between sessions, while memory supports the work happening as you use your computer. That distinction is useful when thinking about an upgrade, because different components serve different purposes in practice. Start with your actual workload, understand the bottleneck, and choose the change that helps your daily tasks.",
+  "description": "Local rendering demonstration, not a news report.",
+  "hashtags": [
+    "#Shorts",
+    "#Technology"
+  ],
+  "visual_keywords": [
+    "computer processor"
+  ],
+  "thumbnail_text": "LOCAL RENDER TEST",
+  "scenes": [
+    {
+      "narration": "Your computer turns instructions into actions, and the processor is where much of that work gets done.",
+      "visual_query": "computer processor",
+      "headline": "Instructions become actions",
+      "claim_ids": [
+        0
+      ]
+    },
+    {
+      "narration": "Think of software as a set of directions, with each instruction contributing to a larger useful task.",
+      "visual_query": "computer processor",
+      "headline": "Software gives directions",
+      "claim_ids": [
+        0
+      ]
+    },
+    {
+      "narration": "Memory holds information that running programs need, giving the processor a place to access their working data.",
+      "visual_query": "computer processor",
+      "headline": "Memory holds working data",
+      "claim_ids": [
+        0
+      ]
+    },
+    {
+      "narration": "Storage keeps files available between sessions, while memory supports the work happening as you use your computer.",
+      "visual_query": "computer processor",
+      "headline": "Storage keeps your files",
+      "claim_ids": [
+        0
+      ]
+    },
+    {
+      "narration": "That distinction is useful when thinking about an upgrade, because different components serve different purposes in practice.",
+      "visual_query": "computer processor",
+      "headline": "Understand each component",
+      "claim_ids": [
+        0
+      ]
+    },
+    {
+      "narration": "Start with your actual workload, understand the bottleneck, and choose the change that helps your daily tasks.",
+      "visual_query": "computer processor",
+      "headline": "Choose for your workload",
+      "claim_ids": [
+        0
+      ]
+    }
+  ],
+  "source_urls": [
+    "https://a.example/doc",
+    "https://b.example/doc",
+    "https://c.example/doc"
+  ],
+  "needs_synthetic_media_disclosure": false
+}

@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autoyt"
+version = "0.1.0"
+description = "Single-channel local YouTube Shorts automation"
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2.8,<3", "pydantic-settings>=2.4,<3", "httpx>=0.27,<1", "feedparser>=6,<7", "trafilatura>=2,<3", "tld>=0.13,<1", "lxml_html_clean>=0.4,<1", "Pillow>=10,<13", "numpy>=1.26,<3", "soundfile>=0.12,<1", "portalocker>=2.10,<4", "APScheduler>=3.11,<4", "google-api-python-client>=2.150,<3", "google-auth-oauthlib>=1.2,<2", "tzdata>=2024.1"]
+
+[project.optional-dependencies]
+tts = ["kokoro-onnx>=0.6.1,<0.7"]
+dev = ["pytest>=8,<10", "ruff>=0.9,<1"]
+
+[project.scripts]
+autoyt = "autoyt.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+autoyt = ["*.ps1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = ["integration: uses installed local media tools"]
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
