@@ -51,7 +51,10 @@ class Speech:
         self.pipeline = None
 
     def segment(self, text, path):
-        if self.cfg.tts_engine == "kokoro":
+        if self.cfg.tts_engine == "gemini":
+            from .gemini_speech import segment
+            segment(self.cfg, text, path)
+        elif self.cfg.tts_engine == "kokoro":
             lang = "hi" if self.cfg.narration_language == "hi" else "en-us"
             if lang == "hi" and not self.cfg.tts_voice.startswith("h"):
                 raise ValueError("Hindi narration requires a Hindi Kokoro voice such as hm_omega")

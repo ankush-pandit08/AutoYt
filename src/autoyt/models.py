@@ -70,8 +70,8 @@ class Script(BaseModel):
             raise ValueError("script must exactly concatenate scene narration")
         if not self.script.startswith(self.hook):
             raise ValueError("hook must start narration")
-        if not 90 <= len(self.script.split()) <= 115:
-            raise ValueError("Narration needs 90–115 words")
+        if not 60 <= len(self.script.split()) <= 115:
+            raise ValueError("Narration needs 60–115 words")
         if any(x in self.model_dump_json().lower() for x in ("lorem ipsum", "placeholder", "insert here")):
             raise ValueError("Unresolved placeholder")
         if any(not x.startswith("#") or " " in x for x in self.hashtags):

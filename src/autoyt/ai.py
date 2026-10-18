@@ -252,8 +252,8 @@ def assemble_script(draft):
     data["script"] = " ".join(scene.narration.strip() for scene in draft.scenes)
     data["hook"] = draft.scenes[0].narration.strip()
     count = len(data["script"].split())
-    if not 90 <= count <= 115:
-        raise ValueError(f"Narration has {count} words; write 105–110 total words across all six scenes")
+    if not 60 <= count <= 115:
+        raise ValueError(f"Narration has {count} words; write 85–100 total words across all six scenes")
     return Script.model_validate(data)
 
 
@@ -273,7 +273,8 @@ def validate_grounding(script, research):
                           *[s.headline for s in script.scenes]])
     for number in re.findall(r"\b\d+(?:[.,]\d+)*\b", editorial):
         if number not in evidence:
-            raise ValueError("Unsupported numerical claim")
+            raise ValueError(f"Unsupported numerical claim: {number}. Omit this numeral, including in "
+                             "product names, because it is absent from the verified evidence.")
     for scene in script.scenes:
         if any(i < 0 or i >= len(research.claims) for i in scene.claim_ids):
             raise ValueError("Invalid claim reference")
@@ -308,9 +309,13 @@ def generate(cfg, llm, topic, research, duration_feedback=None, reviewed_draft=N
         draft = reviewed_draft or llm.structured(
             EditorialDraft if cfg.llm_provider != "ollama" else WriterDraft,
             language_instruction +
-            "Narration: exactly SIX strings, each a complete spoken passage of about 18 words. "
-            "Write 105–110 words TOTAL across the six passages. End every passage with sentence punctuation. "
+            "Narration: exactly SIX strings, each a complete spoken passage of about 15 words. "
+            "When writing Hindi or Hinglish, EVERY narration string must include Hindi in Devanagari, "
+            "including advice and the closing question; retain familiar English tech terms. "
+            "Write 85–100 words TOTAL across the six passages. End every passage with sentence punctuation. "
             "Use only the supplied facts, attributed in THIRD PERSON to their publisher. "
+            "Use only digits listed in allowed_numerals, including inside product names or version labels. "
+            "The topic label may contain numerals that are not established by the verified claims; omit them. "
             "Write for YouTube Shorts retention, not a formal bulletin. No greeting or channel introduction. "
             "Follow this six-beat arc without speaking its labels: "
             "1. A specific curiosity hook in the first sentence, grounded in a verified fact; "
@@ -336,16 +341,15 @@ def generate(cfg, llm, topic, research, duration_feedback=None, reviewed_draft=N
             {"topic_context": topic.title,
              "context_rule": "Topic title identifies the subject; only verified_claims establish factual assertions.",
              "verified_claims": [{"text": c.claim, "attribution": c.attribution} for c in research.claims],
+             "allowed_numerals": sorted(set(re.findall(r"\b\d+(?:[.,]\d+)*\b", " ".join(
+                 c.claim + " " + " ".join(e.quote for e in c.evidence) for c in research.claims)))),
              "target_seconds": cfg.video_duration_seconds, "duration_feedback": duration_feedback})
         try:
             script = writer_script(draft, topic, research)
             if cfg.narration_language == "hi" and not re.search(r"[\u0900-\u097f]", script.script):
                 raise ValueError("Hindi narration was requested; return Hindi text in Devanagari")
             problems = []
-            try:
-                validate_grounding(script, research)
-            except ValueError as error:
-                problems.append(str(error))
+            validate_grounding(script, research)
             audit = llm.structured(ScriptAudit,
                 "Compare published narration, title, headlines, thumbnail and description to verified evidence. "
                 "Faithful Hindi or Hinglish translations and paraphrases of verified claims are supported. General advice clearly "

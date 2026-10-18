@@ -16,7 +16,7 @@ def choose_media(cfg, web, script):
     if cfg.local_media_manifest.is_file():
         local = json.loads(cfg.local_media_manifest.read_text(encoding="utf-8"))
     result = []
-    pixabay_queries, pixabay_used = set(), set()
+    pixabay_queries, pixabay_used = [], set()
     pixabay_failed = False
     for scene in script.scenes:
         asset = {"kind": "graphics", "license": "Original AutoYT graphics", "query": scene.visual_query,
@@ -68,8 +68,14 @@ def choose_media(cfg, web, script):
                 log.warning("Pexels unavailable (%s); using original graphics", type(error).__name__)
         if asset["path"] is None and cfg.pixabay_api_key and not pixabay_failed:
             # At most two distinct search queries per run, cached for 24h; no mass downloading.
-            query = scene.visual_query if scene.visual_query in pixabay_queries or len(pixabay_queries) < 2 else next(iter(pixabay_queries))
-            pixabay_queries.add(query)
+            query = scene.visual_query
+            if query not in pixabay_queries and len(pixabay_queries) >= 2:
+                query = max(pixabay_queries, key=lambda q: len(words(q) & words(scene.visual_query)))
+                if not words(query) & words(scene.visual_query):
+                    result.append(asset)
+                    continue
+            if query not in pixabay_queries:
+                pixabay_queries.append(query)
             try:
                 selected = pixabay_asset(cfg, web, query, pixabay_used)
                 if selected:

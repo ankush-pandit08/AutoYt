@@ -138,3 +138,19 @@ The dashboard shows the morning plan and saved scripts. Plans are dated in the c
 Keep the machine awake with AutoYT running at 05:00. If morning preparation is missed, later video slots do not discover replacements. Old plans are never reused for a new day. Preparation and video generation share the same process lock; a still-busy preparation can cause an overlapping slot to be skipped. The morning list reflects the sources available then, rather than live trends throughout the day. The engaging script prompt uses a factual curiosity hook, immediate payoff, practical takeaway and a relevant comment question. It does not promise viral results.
 
 `scripts/preview_gemini_voice.py` generates an isolated Gemini TTS sample using the existing key without changing the scheduled voice. Use `--text-file` and `--output` for a script preview. Provider free-tier quotas apply.
+
+
+### Default Gemini narration
+
+Set `TTS_ENGINE=gemini`, `TTS_VOICE=Puck` and `GEMINI_TTS_MODEL=gemini-3.8-flash-tts` to use the approved Indian male Hinglish delivery for new videos. The existing `GEMINI_API_KEY` is reused. English tech names and Hindi text are sent verbatim to Gemini; voice style is separate metadata, so delivery instructions are not spoken. Each scene is measured separately for subtitle timing. The selected model controls pacing; the local `TTS_SPEED` setting applies to local engines.
+
+Validated scene audio is cached by exact text, voice, model and delivery style. Interrupted jobs can reuse completed scenes without repeating those API requests. Quota or access failures stop safely and retain the checkpoint. There is no silent change to another voice or paid model. Speech has its own provider quotas; ten video slots do not guarantee enough free speech requests. `doctor --tts-test` makes a small real speech request and checks its audio. Restart the dashboard after changing the engine or voice.
+
+The live configuration uses `GEMINI_MODEL=gemini-3.6-flash` for writing and audits after the newer Flash text model reached its daily free quota and Flash-Lite drafts failed content checks. The separate speech model remains `gemini-3.8-flash-tts`. Model quotas differ; either may stop a run safely when exhausted.
+
+Concise scripts may contain 60–115 words; the prompt targets 85–100 words. The final measured audio and video must still fit the configured maximum of 60 seconds. A shorter script does not need extra filler.
+
+
+Stock selection checks meaningful provider tags and omits generic search fillers such as “close up.” Unrelated matches fall back to original explanatory graphics. Licensing and visual relevance are separate checks; provider metadata alone is not a guarantee of accurate imagery.
+
+The YouTube transport preserves HTTP 308 as resumable progress while setting a bounded timeout. If a rejected render already has a pending upload, an explicit upload block preserves its recovery record until cancellation/deletion has been reconciled. A corrected render must not be resumed into the prior upload session. Cancelled video IDs can be excluded from reconciliation to avoid selecting stale playlist entries.

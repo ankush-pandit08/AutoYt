@@ -22,7 +22,8 @@ class Settings(BaseSettings):
     ollama_embedding_model: str = "all-minilm:22m"
     ollama_context_length: int = Field(default=4096, ge=4096, le=16384)
     ollama_generation_timeout_seconds: int = Field(default=600, ge=60, le=1800)
-    tts_engine: Literal["kokoro", "sapi", "piper"] = "kokoro"
+    tts_engine: Literal["kokoro", "sapi", "piper", "gemini"] = "kokoro"
+    gemini_tts_model: str = Field(default="gemini-3.8-flash-tts", pattern=r"^[a-zA-Z0-9._-]+$")
     tts_voice: str = "af_heart"
     tts_speed: float = Field(default=1.0, ge=0.85, le=1.15)
     narration_language: Literal["en", "hi"] = "en"

@@ -13,12 +13,12 @@ SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googlea
 
 
 def service(cfg, interactive=False):
-    import httplib2
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
     from google_auth_httplib2 import AuthorizedHttp
     from google_auth_oauthlib.flow import InstalledAppFlow
     from googleapiclient.discovery import build
+    from googleapiclient.http import build_http
 
     token = cfg.youtube_token_file
     credentials = None
@@ -41,7 +41,9 @@ def service(cfg, interactive=False):
     temporary.write_text(credentials.to_json(), encoding="utf-8")
     os.chmod(temporary, 0o600)
     temporary.replace(token)
-    youtube = build("youtube", "v3", http=AuthorizedHttp(credentials, http=httplib2.Http(timeout=300)),
+    transport = build_http()  # Preserves 308 as resumable progress, rather than an HTTP redirect.
+    transport.timeout = 300
+    youtube = build("youtube", "v3", http=AuthorizedHttp(credentials, http=transport),
                     cache_discovery=False)
     channels = youtube.channels().list(part="id,contentDetails", mine=True).execute().get("items", [])
     if len(channels) != 1:
@@ -80,13 +82,15 @@ def metadata(script, job_id, assets, privacy="private"):
                        "containsSyntheticMedia": script.needs_synthetic_media_disclosure}}
 
 
-def reconcile(youtube, channel, job_id):
+def reconcile(youtube, channel, job_id, excluded_ids=()):
     playlist = channel["contentDetails"]["relatedPlaylists"]["uploads"]
     page = None
     for _ in range(3):
         response = youtube.playlistItems().list(part="snippet,contentDetails", playlistId=playlist,
                                                maxResults=50, pageToken=page).execute()
         for item in response.get("items", []):
+            if item["contentDetails"]["videoId"] in excluded_ids:
+                continue
             if f"AutoYT job: {job_id}" in item["snippet"].get("description", ""):
                 return item["contentDetails"]["videoId"]
         page = response.get("nextPageToken")
@@ -139,6 +143,8 @@ def upload(cfg, store, job_id, folder):
 
     if not cfg.enable_upload:
         raise RuntimeError("CONFIGURATION: ENABLE_UPLOAD=false; authenticate, then explicitly enable")
+    if (store.load(job_id, "upload_block") or {}).get("blocked"):
+        raise RuntimeError("CONFIGURATION: this job has a cancelled upload requiring reconciliation before replacement")
     job = store.get(job_id)
     if job["dry_run"]:
         raise ValueError("Dry-run jobs cannot upload; generate a new non-dry-run job")
@@ -164,7 +170,8 @@ def upload(cfg, store, job_id, folder):
     if attempt and attempt["video_id"]:
         return confirm(youtube, store, job_id, attempt["video_id"])
     if attempt and not attempt["session_uri"]:
-        video_id = reconcile(youtube, channel, job_id)
+        excluded = [a["video_id"] for a in (store.load(job_id, "cancelled_uploads") or []) if a.get("video_id")]
+        video_id = reconcile(youtube, channel, job_id, excluded)
         if video_id:
             store.upload_progress(job_id, "RETURNED_ID", video_id=video_id)
             return confirm(youtube, store, job_id, video_id)

@@ -1,6 +1,6 @@
 # AutoYT
 
-Personal, local automation for **one** technology YouTube channel. Python, SQLite, optional Ollama or Gemini/Groq API, offline narration and FFmpeg. No account system, payments, queue service, or cloud hosting. An optional dashboard runs on localhost using Python's standard library.
+Personal, local automation for **one** technology YouTube channel. Python, SQLite, optional Ollama or Gemini/Groq API, local or Gemini narration and FFmpeg. No account system, payments, queue service, or cloud hosting. An optional dashboard runs on localhost using Python's standard library.
 
 Discovery → retrieved evidence → original script → voice → relevant licensed stock or original explanatory graphics → animated captions → cover → media validation → upload with the configured **private or public** visibility.
 

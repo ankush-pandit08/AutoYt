@@ -266,3 +266,37 @@ def test_revoked_refresh(cfg, monkeypatch):
     monkeypatch.setattr(Credentials, "from_authorized_user_file", lambda *args: credentials)
     with pytest.raises(RuntimeError, match="revoked"):
         youtube.service(cfg)
+
+
+def test_service_transport_preserves_resumable_308_responses(cfg, monkeypatch):
+    from google.oauth2.credentials import Credentials
+
+    cfg.youtube_channel_id = "channel-123"
+    cfg.youtube_token_file.parent.mkdir(parents=True)
+    cfg.youtube_token_file.write_text("{}")
+    credentials = SimpleNamespace(expired=False, valid=True, to_json=lambda: "{}")
+    monkeypatch.setattr(Credentials, "from_authorized_user_file", lambda *args: credentials)
+    def build(*args, **kwargs):
+        transport = kwargs["http"].http
+        assert 308 not in transport.redirect_codes
+        assert transport.timeout == 300
+        return SimpleNamespace(channels=lambda: SimpleNamespace(list=lambda **kwargs:
+            Execute({"items": [{"id": "channel-123"}]})))
+    monkeypatch.setattr("googleapiclient.discovery.build", build)
+    assert youtube.service(cfg)[1]["id"] == "channel-123"
+
+
+def test_rejected_visual_upload_stays_blocked_until_reconciled(ready, monkeypatch):
+    cfg, store, job_id, folder = ready
+    store.save(job_id, "upload_block", {"blocked": True})
+    monkeypatch.setattr(youtube, "service", lambda *args: pytest.fail("Blocked job must not reach YouTube"))
+    with pytest.raises(RuntimeError, match="reconciliation"):
+        youtube.upload(cfg, store, job_id, folder)
+
+
+def test_reconcile_excludes_cancelled_upload_entries():
+    items = [{"snippet": {"description": "AutoYT job: job-123"}, "contentDetails": {"videoId": video}}
+             for video in ("cancelled-video", "replacement-video")]
+    api = SimpleNamespace(playlistItems=lambda: SimpleNamespace(list=lambda **kwargs: Execute({"items": items})))
+    channel = {"contentDetails": {"relatedPlaylists": {"uploads": "uploads-playlist"}}}
+    assert youtube.reconcile(api, channel, "job-123", ["cancelled-video"]) == "replacement-video"

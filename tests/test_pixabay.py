@@ -4,7 +4,7 @@ import os
 from PIL import Image
 
 from autoyt.media import choose_media
-from autoyt.pixabay import acquire, search
+from autoyt.pixabay import acquire, relevant, search
 
 
 def test_search_cache_is_reused_for_24_hours_without_saving_key(cfg):
@@ -40,6 +40,7 @@ def test_image_fallback_records_license_and_does_not_reuse_asset(cfg):
             if "/videos/" in url:
                 return '{"hits":[]}'
             return json.dumps({"hits": [{"id": 12, "pageURL": "https://pixabay.com/photos/id-12/",
+                                         "tags": "technology, computer, software",
                                          "user": "Creator", "largeImageURL": "https://cdn.pixabay.com/12.jpg"}]})
 
         def download(self, url, path):
@@ -67,3 +68,12 @@ def test_bad_provider_key_stops_requests_and_does_not_leak_into_logs(cfg, script
     assert all(a["kind"] == "graphics" for a in choose_media(cfg, object(), script))
     assert calls == [1]
     assert cfg.pixabay_api_key not in caplog.text
+
+
+def test_generic_query_terms_do_not_accept_unrelated_stock():
+    query = "cyber security digital lock concept close up"
+    assert not relevant(query, {"tags": "bacon, pan, hot, belly bacon, meal, food, close up"})
+    assert not relevant(query, {"tags": "bee, honey bee, insect, pollen, close up"})
+    assert not relevant(query, {"tags": "firenze, italy, black white, europe, travel, tourism, street, house, lock, security"})
+    assert not relevant(query, {"tags": "heart, lock, padlock, fence, love"})
+    assert relevant(query, {"tags": "cyber, security, digital, encryption"})

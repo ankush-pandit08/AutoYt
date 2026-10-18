@@ -195,7 +195,7 @@ class Pipeline:
                         script = ai.generate(cfg, self.llm, Topic.model_validate(db.load(job_id, "topic")),
                                              Research.model_validate(db.load(job_id, "research")),
                                              f"Measured {duration:.1f}s; target {cfg.video_duration_seconds}s. "
-                                             "Adjust word count within 90–115 words, preserve verified facts.")
+                                             "Adjust word count within 60–115 words, preserve verified facts.")
                         self.llm.release()
                         self._save(job_id, folder, "script", script)
                     self._save(job_id, folder, "timing", segments)

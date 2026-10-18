@@ -54,6 +54,15 @@ def test_script_schema(script):
     assert Script.model_validate_json(script.model_dump_json()) == script
 
 
+def test_concise_complete_short_does_not_need_padding(script):
+    data = script.model_dump()
+    for scene in data["scenes"]:
+        scene["narration"] = " ".join(scene["narration"].split()[:12]).rstrip(".,") + "."
+    data["script"] = " ".join(s["narration"] for s in data["scenes"])
+    data["hook"] = data["scenes"][0]["narration"]
+    assert len(Script.model_validate(data).scenes) == 6
+
+
 @pytest.mark.parametrize("edit", ["missing", "inconsistent", "short", "placeholder"])
 def test_bad_script(script, edit):
     data = script.model_dump()

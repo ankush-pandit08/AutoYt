@@ -39,7 +39,10 @@ def doctor(cfg):
             checks["evidence_embeddings"] = "OK" if cfg.ollama_embedding_model in names else "MODEL MISSING: ollama pull " + cfg.ollama_embedding_model
         except Exception:
             checks["ollama"] = "UNAVAILABLE: install/start local Ollama"
-    if cfg.tts_engine == "kokoro":
+    if cfg.tts_engine == "gemini":
+        checks["tts"] = "Gemini speech key configured; run doctor --tts-test" if cfg.gemini_api_key else "REQUIRED: GEMINI_API_KEY"
+        checks["voice"] = cfg.tts_voice + " / " + cfg.gemini_tts_model
+    elif cfg.tts_engine == "kokoro":
         ready = importlib.util.find_spec("kokoro_onnx") and cfg.kokoro_model.is_file() and cfg.kokoro_voices.is_file()
         checks["tts"] = "Kokoro CPU installed; run doctor --tts-test" if ready else "MISSING: install .[tts] and run scripts/setup_kokoro.py"
         checks["voice"] = cfg.tts_voice + " / " + cfg.narration_language

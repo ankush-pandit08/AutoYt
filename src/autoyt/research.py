@@ -364,11 +364,15 @@ def research(cfg, web, llm, topic, candidates, folder=None):
     audit = llm.structured(Audit,
         "Independently audit these claims against retrieved documents. Reject contradictions, stale "
         "information, missing context, misleading comparison, unsupported certainty or numerical claims. "
-        "Audit the supplied claims, not unrelated assertions elsewhere in the documents. For rolling "
+        "Audit the supplied claims, not unrelated assertions elsewhere in the documents. "
         "Each claim must be individually established by BOTH its primary quotation and at least one "
         "independent quotation. Related subject matter is not corroboration. Use context only to resolve "
-        "references; preserve uncertainty, negation and event dates. If supported, return reasons=[]. "
-        "vendor advisories, updated_at with date_basis=dated_advisory_heading identifies the current "
+        "references. The evidence quotations have already been checked as exact substrings of the FULL "
+        "retrieved documents. current_context is only a SHORT excerpt and may omit those quotations; "
+        "do not reject a quotation merely because it is outside that excerpt. Evaluate whether each "
+        "claim is entailed by its supplied evidence quotations. Preserve "
+        "uncertainty, negation and event dates. If supported, return reasons=[]. "
+        "For rolling vendor advisories, updated_at with date_basis=dated_advisory_heading identifies the current "
         "dated update; published_at may be the older index-page creation date. "
         "supported must be false if any material claim is not entailed by its quotations.",
         {"claims": [c.model_dump() for c in claims], "sources": [

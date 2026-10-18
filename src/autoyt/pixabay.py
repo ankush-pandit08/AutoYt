@@ -7,11 +7,36 @@ from urllib.parse import urlencode
 from PIL import Image
 
 from .audio import probe
+from .discovery import words
 from .store import write_json
+
+FILLER = {"close", "up", "closeup", "concept", "background", "blinking", "lights", "room", "glowing"}
+
+
+def relevant(query, hit):
+    # Search APIs can return unrelated matches to generic words such as "close up".
+    terms = words(query) - FILLER
+    if "server" in terms or "servers" in terms:
+        terms |= {"network", "networking", "data", "router", "rack"}
+    if "lock" in terms:
+        terms |= {"padlock", "keyhole", "encryption"}
+    tags = ",".join(hit.get("tags", "").split(",")[:8])
+    tag_words = words(tags) - FILLER
+    tech = {"server", "servers", "cyber", "digital", "backup", "software", "computer", "data",
+            "storage", "network", "technology", "cybersecurity"}
+    anchors = tech | {"networking", "router", "rack", "security", "lock", "padlock", "encryption",
+                      "chip", "keyboard", "laptop", "code", "circuit", "processor", "database",
+                      "disk", "internet", "binary"}
+    if terms & tech and not tag_words & anchors:
+        return False
+    if tag_words & {"heart", "love", "romance", "valentine"} and not terms & {"heart", "love", "romance"}:
+        return False
+    return bool(terms & tag_words)
 
 
 def search(cfg, web, query, kind):
-    params = {"q": query[:100], "per_page": 5, "safesearch": "true", "order": "popular"}
+    specific = " ".join(w for w in query.split() if w.lower() not in FILLER)
+    params = {"q": specific[:100], "per_page": 5, "safesearch": "true", "order": "popular"}
     if kind == "image":
         params.update(image_type="photo", orientation="vertical", min_width=720, min_height=1280)
     key = hashlib.sha256(json.dumps([kind, params], sort_keys=True).encode()).hexdigest()[:24]
@@ -29,6 +54,8 @@ def search(cfg, web, query, kind):
 def acquire(cfg, web, query, used):
     for kind in ("video", "image"):
         for hit in search(cfg, web, query, kind).get("hits", []):
+            if not relevant(query, hit):
+                continue
             identity = f"{kind}:{int(hit['id'])}"
             if identity in used:
                 continue
@@ -62,6 +89,7 @@ def acquire(cfg, web, query, used):
                 temporary.replace(path)
             used.add(identity)
             return {"kind": "stock" if kind == "video" else "stock_image", "path": str(path.resolve()),
+                    "tags": hit.get("tags", ""),
                     "query": query, "source_url": hit["pageURL"], "provider": "Pixabay",
                     "license": "Pixabay Content License https://pixabay.com/service/license-summary/",
                     "attribution": f"{kind.title()} by {hit['user']} on Pixabay: {hit['pageURL']}"}
