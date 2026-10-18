@@ -56,7 +56,7 @@ def service(cfg, interactive=False):
     return youtube, channel
 
 
-def metadata(script, job_id, assets, privacy="private"):
+def metadata(script, job_id, assets, privacy="private", include_description=False):
     if privacy not in ("private", "public"):
         raise ValueError("Unsupported upload visibility")
     language = "hi" if any("\u0900" <= c <= "\u097f" for c in script.script) else "en"
@@ -71,12 +71,14 @@ def metadata(script, job_id, assets, privacy="private"):
         credits.add(credit)
     description += "\n\nVisuals are illustrative.\n" + "\n".join(sorted(credits))
     description += f"\n\nAutoYT job: {job_id}"
+    if not include_description:
+        description = ""
     if len(description) > 4900 or len(description.encode("utf-8")) > 4900:
         raise ValueError("YouTube description exceeds safe length")
     if any(c in script.title for c in "<>"):
         raise ValueError("Invalid YouTube title characters")
     return {"snippet": {"title": script.title, "description": description,
-                        "tags": [h.lstrip("#") for h in script.hashtags], "categoryId": "28",
+                        "tags": [h.lstrip("#") for h in script.hashtags] + [f"AutoYT-job-{job_id}"], "categoryId": "28",
                         "defaultLanguage": language, "defaultAudioLanguage": language},
             "status": {"privacyStatus": privacy,
                        "containsSyntheticMedia": script.needs_synthetic_media_disclosure}}
@@ -88,11 +90,19 @@ def reconcile(youtube, channel, job_id, excluded_ids=()):
     for _ in range(3):
         response = youtube.playlistItems().list(part="snippet,contentDetails", playlistId=playlist,
                                                maxResults=50, pageToken=page).execute()
+        candidates = []
         for item in response.get("items", []):
             if item["contentDetails"]["videoId"] in excluded_ids:
                 continue
             if f"AutoYT job: {job_id}" in item["snippet"].get("description", ""):
                 return item["contentDetails"]["videoId"]
+            candidates.append(item["contentDetails"]["videoId"])
+        # A metadata tag preserves recovery when the public description is empty.
+        if candidates:
+            videos = youtube.videos().list(part="snippet", id=",".join(candidates)).execute()
+            for video in videos.get("items", []):
+                if f"AutoYT-job-{job_id}" in video.get("snippet", {}).get("tags", []):
+                    return video["id"]
         page = response.get("nextPageToken")
         if not page:
             break

@@ -22,6 +22,8 @@ def choose_media(cfg, web, script):
         asset = {"kind": "graphics", "license": "Original AutoYT graphics", "query": scene.visual_query,
                  "attribution": "Original explanatory graphics", "path": None, "source_url": None}
         for entry in local:
+            if entry.get("license") == "CC-BY-4.0":
+                continue  # Empty upload descriptions cannot carry mandatory attribution.
             if not entry.get("license") or not entry.get("source_url") or not entry.get("permitted_use"):
                 continue
             try:

@@ -104,7 +104,7 @@ def test_cc_by_credits_required_at_upload(ready, script, monkeypatch):
     store.save(job_id, "media_assets", [asset])
     with pytest.raises(ValueError, match="credits"):
         youtube.upload(cfg, store, job_id, folder)
-    body = youtube.metadata(script, job_id, [asset])
+    body = youtube.metadata(script, job_id, [asset], include_description=True)
     assert all(value in body["snippet"]["description"] for value in (asset["attribution"], asset["license_url"], asset["source_url"]))
     assert "Edited/cropped" in body["snippet"]["description"]
 
@@ -300,3 +300,19 @@ def test_reconcile_excludes_cancelled_upload_entries():
     api = SimpleNamespace(playlistItems=lambda: SimpleNamespace(list=lambda **kwargs: Execute({"items": items})))
     channel = {"contentDetails": {"relatedPlaylists": {"uploads": "uploads-playlist"}}}
     assert youtube.reconcile(api, channel, "job-123", ["cancelled-video"]) == "replacement-video"
+
+
+def test_empty_description_preserves_recovery_tag(script):
+    body = youtube.metadata(script, "job-123", [{"attribution": "Original graphics"}])
+    assert body["snippet"]["description"] == ""
+    assert "AutoYT-job-job-123" in body["snippet"]["tags"]
+
+
+def test_reconcile_empty_description_by_tag():
+    api = SimpleNamespace(
+        playlistItems=lambda: SimpleNamespace(list=lambda **kwargs: Execute({"items": [
+            {"snippet": {"description": ""}, "contentDetails": {"videoId": "replacement"}}]})),
+        videos=lambda: SimpleNamespace(list=lambda **kwargs: Execute({"items": [
+            {"id": "replacement", "snippet": {"tags": ["AutoYT-job-job-123"]}}]})))
+    channel = {"contentDetails": {"relatedPlaylists": {"uploads": "uploads-playlist"}}}
+    assert youtube.reconcile(api, channel, "job-123") == "replacement"

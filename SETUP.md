@@ -38,7 +38,7 @@ Log in to [Pixabay's API documentation](https://pixabay.com/api/docs/) to see yo
 PIXABAY_API_KEY=your_actual_key
 ```
 
-Pixabay is optional. AutoYT tries local licensed assets and configured Pexels videos, then Pixabay video/photo search, then original graphics. Each run uses at most two different Pixabay queries and downloads at most one asset per scene. Search responses are cached for 24 hours as required by the provider; already-downloaded media is reused locally. Portrait photos can use pan/zoom; lower-resolution footage is skipped. Source URLs, license references and creator credits are recorded in each job and its YouTube description. Generic stock is labelled illustrative on screen. API failures fall back to original graphics without printing credentials.
+Pixabay is optional. AutoYT tries local licensed assets and configured Pexels videos, then Pixabay video/photo search, then original graphics. Each run uses at most two different Pixabay queries and downloads at most one asset per scene. Search responses are cached for 24 hours as required by the provider; already-downloaded media is reused locally. Portrait photos can use pan/zoom; lower-resolution footage is skipped. Source URLs, license references and creator credits are recorded locally in each job; YouTube descriptions are left empty. Generic stock is labelled illustrative on screen. API failures fall back to original graphics without printing credentials.
 
 ### Other offline voices
 
