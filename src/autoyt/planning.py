@@ -35,6 +35,7 @@ def prepare_day(cfg, moment=None):
             # Persist discovery once. An interrupted preparation resumes this same snapshot.
             candidates = discovery.discover(cfg, web)
             previous = store.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
+            previous += store.recent_research_rejections()
             selected = []
             for topic in candidates:
                 if discovery.duplicate(topic.title, previous + [t.title for t in selected]):

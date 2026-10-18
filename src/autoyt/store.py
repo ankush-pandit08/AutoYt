@@ -137,6 +137,16 @@ class Store:
                 "AND (j.state NOT IN ('FAILED','SKIPPED') "
                 "OR EXISTS(SELECT 1 FROM upload_attempts u WHERE u.job_id=j.id))", (cutoff, visibility or "private"))]
 
+    def recent_research_rejections(self, hours=6):
+        """Temporarily avoid repeatedly checking stories with insufficient evidence in new runs."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        with self.connect() as db:
+            rows = db.execute("SELECT a.payload FROM artifacts a JOIN video_jobs j ON a.job_id=j.id "
+                              "WHERE a.kind='research_attempts' AND j.updated_at>? AND j.dry_run=0",
+                              (cutoff,))
+            return list(dict.fromkeys(attempt["topic"] for row in rows for attempt in json.loads(row[0])
+                                      if isinstance(attempt, dict) and attempt.get("topic")))
+
     def recent_scripts(self, days, excluding, visibility=None):
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         with self.connect() as db:

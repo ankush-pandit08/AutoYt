@@ -113,11 +113,14 @@ class Pipeline:
                     else:
                         candidates = discovery.discover(cfg, self.web)
                         previous = db.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
+                        previous += db.recent_research_rejections()
                         candidates = [t for t in candidates if not discovery.duplicate(t.title, previous)]
                         if job["topic"]:
                             candidates = [t for t in candidates if discovery.similarity(t.title, job["topic"]) >= .35]
                     if not candidates:
-                        db.update(job_id, "SKIPPED", error="No fresh, relevant, nonduplicate technology topic")
+                        db.update(job_id, "SKIPPED", error="No fresh, relevant, nonduplicate technology topic; "
+                                  "stories rejected by evidence checks rest for six hours. Retry a saved run "
+                                  "to recheck its story sooner.")
                         return job_id
                     if not saved:
                         self._save(job_id, folder, "candidates", [t.model_dump(mode="json") for t in candidates])
@@ -148,6 +151,8 @@ class Pipeline:
                             continue
                         if discovery.duplicate(candidate.title, previous):
                             continue
+                        self._save(job_id, folder, "topic", candidate)
+                        db.update(job_id, STAGES[index], topic=candidate.title)
                         try:
                             result = research.research(cfg, self.web, self.llm, candidate, candidates, folder)
                         except ValueError as error:
