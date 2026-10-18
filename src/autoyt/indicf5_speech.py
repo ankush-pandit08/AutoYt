@@ -41,10 +41,12 @@ def generate(cfg, items):
         request_path = cfg.cache_dir / ("indicf5-request-" + uuid.uuid4().hex + ".json")
         write_json(request_path, {"model_dir": str(cfg.indicf5_model_dir.resolve()),
             "reference_audio": str(cfg.indicf5_reference_audio.resolve()), "reference_text": reference,
-            "steps": cfg.indicf5_steps, "speed": cfg.tts_speed, "items": missing})
+            "steps": cfg.indicf5_steps, "speed": cfg.tts_speed, "threads": cfg.indicf5_threads,
+            "metrics_path": str((cfg.cache_dir / "indicf5-last-run.json").resolve()), "items": missing})
         env = os.environ.copy()
         env.update({"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "PYTHONUTF8": "1"})
-        log.info("Generating %s local IndicF5 segments; CPU inference may take several minutes", len(missing))
+        log.info("Generating %s local IndicF5 segments (%s CPU threads, %s steps); inference may take minutes",
+                 len(missing), cfg.indicf5_threads, cfg.indicf5_steps)
         try:
             error_log = cfg.cache_dir / "indicf5-worker-error.log"
             with error_log.open("w", encoding="utf-8") as stream:

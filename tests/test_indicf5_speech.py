@@ -43,6 +43,9 @@ def test_local_generation_cache_and_input_identity(cfg, tmp_path, monkeypatch):
     first = path.read_bytes()
     Speech(cfg).segment("Hindi and English text", path)
     assert len(calls) == 1 and path.read_bytes() == first
+    cfg.indicf5_threads = 6
+    Speech(cfg).segment("Hindi and English text", path)
+    assert len(calls) == 1  # Tuning CPU execution must not discard completed narration.
     cfg.indicf5_steps = 32
     Speech(cfg).segment("Hindi and English text", path)
     assert len(calls) == 2

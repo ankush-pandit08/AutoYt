@@ -3,20 +3,18 @@ import hashlib
 import importlib.util
 import json
 import sys
+import time
 from pathlib import Path
 
 
-def main():
-    import numpy as np
-    import soundfile as sf
+def load_model(root, threads=2):
     import torch
     from safetensors.torch import load_file
     from vocos import Vocos
 
-    torch.set_num_threads(2)
+    torch.set_num_threads(threads)
     torch.set_num_interop_threads(1)
-    request = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-    root = Path(request["model_dir"])
+    root = Path(root)
     manifest = json.loads((root / "provenance.json").read_text(encoding="utf-8"))
     for name, expected in manifest["files"].items():
         with (root / name).open("rb") as stream:
@@ -57,17 +55,41 @@ def main():
     vocoder.load_state_dict(weights)
     del weights
     model._vocoder = vocoder.eval()
+    return model
+
+
+def main():
+    import numpy as np
+    import soundfile as sf
+    from indicf5_optimizations import cached_conditioning
+
+    started = time.monotonic()
+    request = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    model = load_model(request["model_dir"], request.get("threads", 2))
+    load_seconds = time.monotonic() - started
+    report = {"load_seconds": round(load_seconds, 3), "segments": [],
+              "threads": request.get("threads", 2), "steps": request["steps"],
+              "speech_speed": request["speed"], "precision": "float32"}
     for item in request["items"]:
+        segment_started = time.monotonic()
         print("Generating IndicF5 segment", item["index"], flush=True)
-        samples, rate = model.generate(
-            item["text"], ref_audio=request["reference_audio"], ref_text=request["reference_text"],
-            nfe_step=request["steps"], speed=request["speed"], cfg_strength=2.0)
+        with cached_conditioning(model):
+            samples, rate = model.generate(
+                item["text"], ref_audio=request["reference_audio"], ref_text=request["reference_text"],
+                nfe_step=request["steps"], speed=request["speed"], cfg_strength=2.0)
         if not len(samples) or not np.isfinite(samples).all():
             raise ValueError("IndicF5 produced invalid audio")
         target = Path(item["output"])
         temporary = target.with_suffix(".tmp.wav")
         sf.write(temporary, samples, rate)
         temporary.replace(target)
+        elapsed = time.monotonic() - segment_started
+        report["segments"].append({"index": item["index"], "seconds": round(elapsed, 3),
+                                   "audio_seconds": len(samples) / rate})
+        print(f"Segment {item['index']} generated in {elapsed:.1f}s", flush=True)
+    report["total_seconds"] = round(time.monotonic() - started, 3)
+    if request.get("metrics_path"):
+        Path(request["metrics_path"]).write_text(json.dumps(report, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":

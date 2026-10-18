@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     indicf5_reference_audio: Path = Path("data/voices/indicf5-reference.wav")
     indicf5_reference_text_file: Path = Path("data/voices/indicf5-reference.txt")
     indicf5_steps: int = Field(default=16, ge=8, le=64)
+    indicf5_threads: int = Field(default=2, ge=1, le=12)
     indicf5_timeout_seconds: int = Field(default=3600, ge=60, le=7200)
     tts_voice: str = "af_heart"
     tts_speed: float = Field(default=1.0, ge=0.85, le=1.15)
