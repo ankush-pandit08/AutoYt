@@ -1,6 +1,6 @@
 # AutoYT
 
-Personal, local automation for **one** technology YouTube channel. Python, SQLite, Ollama, offline narration and FFmpeg. No account system, web server, payments, queue service, or cloud hosting.
+Personal, local automation for **one** technology YouTube channel. Python, SQLite, Ollama, offline narration and FFmpeg. No account system, payments, queue service, or cloud hosting. An optional dashboard runs on localhost using Python's standard library.
 
 Discovery → retrieved evidence → original script → voice → relevant licensed stock or original explanatory graphics → animated captions → cover → media validation → upload with the configured **private or public** visibility.
 
@@ -18,6 +18,12 @@ Install FFmpeg (including FFprobe), Ollama and an offline English voice as descr
 
 The checked-in `.env.example` uses Kokoro. The local `.env` may select the Windows SAPI fallback where Kokoro is unavailable. Voice quality varies; `doctor --tts-test` synthesizes a real short voice sample. Kokoro is loaded lazily. Piper accepts your separately installed binary and licensed ONNX voice model. Ollama uses a configurable 4K context and unloads the model after each structured call to free RAM for narration/rendering. A tested Windows dependency snapshot is in `requirements-windows.lock.txt`; use `pyproject.toml` for Linux or a fresh installation.
 
+## Local control room
+
+Run `powershell -ExecutionPolicy Bypass -File scripts/start-autoyt.ps1` on Windows, or `python -m autoyt dashboard` on Linux. Open **http://127.0.0.1:8765**. Monitor daily results, live stages, failures, previews, sources and media credits; pause/resume the scheduler or retry a failed job. Pause state survives restart. Browser closure does not stop the process. See [DASHBOARD.md](DASHBOARD.md) and [MEDIA_LICENSES.md](MEDIA_LICENSES.md).
+
+The default ten slots are **06:00, 07:40, 09:20, 11:00, 12:40, 14:20, 16:00, 17:40, 19:20 and 21:00 Asia/Kolkata**. Ten is an attempt limit, not a guarantee of ten uploads; failed quality checks never publish.
+
 ## Commands
 
 | Command | Purpose |
@@ -31,7 +37,8 @@ The checked-in `.env.example` uses Kokoro. The local `.env` may select the Windo
 | `python -m autoyt jobs` | Show states, errors, topics and checkpoints (`list-jobs`/`status` aliases) |
 | `python -m autoyt auth` | Initial Google consent, check and pin the single authorized channel |
 | `python -m autoyt upload JOB_ID` | Upload a validated non-dry-run job with its saved visibility |
-| `python -m autoyt scheduler` | Foreground scheduler: 08:00, 14:00, 20:00 Asia/Kolkata |
+| `python -m autoyt dashboard` | Local monitoring UI and scheduler at http://127.0.0.1:8765 |
+| `python -m autoyt scheduler` | Foreground scheduler: ten daily slots in Asia/Kolkata |
 | `python -m autoyt cleanup` | Remove old reproducible intermediates; retain final outputs, evidence and recovery data |
 
 Run from the project directory so `.env` and relative paths resolve correctly. `scripts/run.ps1` and `scripts/run.sh` set that directory. Nonzero CLI exit status indicates failure or a competing process.
@@ -40,7 +47,7 @@ Run from the project directory so `.env` and relative paths resolve correctly. `
 
 Configuration lives in `.env`, excluded from version control. `ENABLE_UPLOAD=false` and `YOUTUBE_PRIVACY=private` are the example defaults. After authentication and channel verification, enable uploads for normal runs. `YOUTUBE_PRIVACY=public` publishes future jobs once automated evidence and media checks pass. Visibility is saved in each job's metadata; changing the default never republishes older private jobs on retry. Dry-run jobs permanently prohibit uploading.
 
-At most one pipeline can run across processes. Slot reservations and daily run counts are transactional. The default daily attempt limit is three, including failures; quality takes priority. Missed old slots are skipped, with no backlog catch-up. Interrupted active work resumes before new work, subject to matching dry-run mode. Failed jobs remain available for explicit retry; new scheduled slots can try fresh topics. The scheduler must be running and the machine awake. No OS scheduler is registered by installation.
+At most one pipeline can run across processes. Slot reservations and daily run counts are transactional. The default daily attempt limit is ten, including failures; quality takes priority. Missed old slots are skipped, with no backlog catch-up. Interrupted active work resumes before new work, subject to matching dry-run mode. Failed jobs remain available for explicit retry; new scheduled slots can try fresh topics. The scheduler must be running and the machine awake. The base installer does not register an OS task; `scripts/enable-autostart.ps1` separately enables current-user startup on Windows.
 
 Each job saves `topic.json`, `research.json`, `script.json`, `timing.json`, `narration.wav`, `media_assets.json`, `subtitles.ass`, `subtitles.srt`, `cover.png`, `thumbnail.png`, `final.mp4`, `metadata.json` and `validation.json` under `output/jobs/JOB_ID`. JSON is written atomically; completed stages are checkpointed in SQLite. The review queue is `jobs` with state `AWAITING_REVIEW`.
 
@@ -62,7 +69,7 @@ The requested duration is a writing guide, not an exact video length. Natural na
 
 Default visuals are original procedural technology cards, circuit motifs and gentle camera motion. They explain script headlines and do not depict fake product demonstrations. Optional Pexels stock is generic illustrative B-roll; the description identifies it as illustrative. No copyrighted YouTube videos or popular music are downloaded. Background music is intentionally absent in this version.
 
-Pexels requires your own valid API key; account/key availability is provider-controlled. Downloads are bounded and cached, and provenance/attribution is recorded. Review [Pexels API documentation](https://www.pexels.com/api/documentation/) and the [Pexels License](https://www.pexels.com/license/) before use. If unavailable, AutoYT tries a licensed local manifest and otherwise uses original graphics. To configure local footage, copy `assets/footage/manifest.example.json` to `manifest.json` and record your actual permissions and matching tags. Example paths are documentation, not bundled media licenses.
+Pexels requires your own valid API key; account/key availability is provider-controlled. Downloads are bounded and cached, and provenance/attribution is recorded. Review [Pexels API documentation](https://www.pexels.com/api/documentation/) and the [Pexels License](https://www.pexels.com/license/) before use. If unavailable, AutoYT tries Pixabay when configured, then original graphics. To configure local footage, copy `assets/footage/manifest.example.json` to `manifest.json` and record your actual permissions and matching tags. Local imports must declare CC0-1.0 or CC-BY-4.0 with the exact official license URL, creator attribution, `free_to_use=true`, and permitted use; an arbitrary "free" label is rejected. Example paths are documentation, not bundled media licenses.
 
 Pixabay video and portrait-photo retrieval is implemented with `PIXABAY_API_KEY`. Searches are cached for 24 hours, query counts are bounded, and licensed media/credits are saved locally. Photo B-roll uses gentle pan/zoom. A bad key or provider failure falls back to original graphics without exposing the key in logs. Unsplash integration remains unimplemented. No stock keys are required for the original-graphics path.
 

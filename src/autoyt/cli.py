@@ -82,6 +82,8 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="command", required=True)
     doc = sub.add_parser("doctor")
     doc.add_argument("--tts-test", action="store_true")
+    dashboard = sub.add_parser("dashboard")
+    dashboard.add_argument("--port", type=int, default=8765, choices=range(1024, 65536), metavar="PORT")
     for name in ("run-once", "generate"):
         cmd = sub.add_parser(name)
         cmd.add_argument("--dry-run", action="store_true")
@@ -125,6 +127,9 @@ def main(argv=None):
         elif args.command == "scheduler":
             from .scheduling import serve
             serve(cfg)
+        elif args.command == "dashboard":
+            from .dashboard import serve
+            serve(cfg, args.port)
         elif args.command == "auth":
             from dotenv import set_key
 

@@ -20,7 +20,7 @@ autoyt = "autoyt.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-autoyt = ["*.ps1"]
+autoyt = ["*.ps1", "web/*.html", "web/*.css", "web/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

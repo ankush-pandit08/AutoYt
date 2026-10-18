@@ -74,9 +74,11 @@ Run `retry JOB_ID`, preserving the original database, video and marker. The save
 
 ## Schedule
 
-The configured slots are **08:00, 14:00 and 20:00 Asia/Kolkata**. Start `scripts/run.ps1 scheduler` (or `bash scripts/run.sh scheduler`). Leave the process running and disable sleep during generation. Old missed slots are skipped. `MAX_VIDEOS_PER_DAY=3` is a maximum, not a promise that unreliable stories will be uploaded.
+The default schedule has ten slots in Asia/Kolkata: **06:00, 07:40, 09:20, 11:00, 12:40, 14:20, 16:00, 17:40, 19:20, 21:00**. `MAX_VIDEOS_PER_DAY=10` caps live attempts, including failed/skipped runs. Ten successful uploads are not guaranteed.
 
-Windows Task Scheduler can launch this one foreground scheduler at logon: Program `D:\LoopYt\.venv\Scripts\python.exe`, Arguments `-m autoyt scheduler`, Start in `D:\LoopYt`. Select **Do not start a new instance**, and optionally restart on failure. Prefer running as your own logged-in account when using SAPI. Set paths for your checkout. Do not also create three independent cron/time triggers for the same installation.
+Start `powershell -ExecutionPolicy Bypass -File scripts/start-autoyt.ps1` on Windows. It starts Ollama when available and the localhost dashboard with its scheduler. The browser opens http://127.0.0.1:8765. On Linux run `python -m autoyt dashboard`. Keep the machine awake. The UI provides persistent pause/resume, progress, previews, source/license records and retry controls. Do not also start the separate `scheduler` command.
+
+To enable Windows sign-in startup explicitly, run `powershell -ExecutionPolicy Bypass -File scripts/enable-autostart.ps1`. It creates a limited-privilege current-user task named `AutoYT Personal Dashboard`, with three restart attempts after failure. It starts after sign-in, not before sign-in. Re-run it if you move the checkout. To remove it, use `Unregister-ScheduledTask -TaskName 'AutoYT Personal Dashboard' -Confirm:$false`. Removing the task does not stop an already running process; pause from the dashboard first.
 
 Linux systemd example (replace paths/user):
 
@@ -89,7 +91,7 @@ After=network-online.target
 Type=simple
 User=YOUR_USER
 WorkingDirectory=/home/YOUR_USER/AutoYT
-ExecStart=/home/YOUR_USER/AutoYT/.venv/bin/python -m autoyt scheduler
+ExecStart=/home/YOUR_USER/AutoYT/.venv/bin/python -m autoyt dashboard
 Restart=on-failure
 RestartSec=30
 
@@ -97,7 +99,7 @@ RestartSec=30
 WantedBy=multi-user.target
 ```
 
-No service/task is installed or started automatically. Start only one scheduler after validating your configuration. `ENABLE_UPLOAD=false` still allows scheduled local generation, while keeping all YouTube upload endpoints disabled.
+The base installer does not register a service/task. The optional startup script does so explicitly. Run exactly one dashboard or standalone scheduler after validating your configuration. For Linux remote access keep the loopback binding and use an SSH tunnel as described in SERVER.md. `ENABLE_UPLOAD=false` still allows scheduled local generation, while keeping all YouTube upload endpoints disabled.
 
 ## Storage and maintenance
 

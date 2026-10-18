@@ -6,7 +6,7 @@ One Python process executes a linear, restartable job. A second process cannot a
 
 | Module | Responsibility |
 | --- | --- |
-| `config.py` | Typed `.env`, private/public configuration, three slots, local Ollama and 9:16 validation |
+| `config.py` | Typed `.env`, private/public configuration, one to ten daily slots, local Ollama and 9:16 validation |
 | `store.py` | Transactional SQLite/WAL, atomic JSON, reservations and upload progress |
 | `discovery.py` | Real RSS/Atom parsing, freshness, niche scores, lexical duplicate detection |
 | `net.py` | Public HTTPS retrieval, robots rules for articles, bounded downloads/retries |
@@ -33,7 +33,7 @@ The DB and mirrored JSON are not a cross-filesystem transaction. Atomic JSON rep
 
 ## Scheduling and resources
 
-APScheduler in-process cron triggers run three times daily in Asia/Kolkata. No scheduler job store is needed: triggers are fixed configuration, while handled slots persist in SQLite. Misfire grace is 55 seconds, and the callback independently rejects slots older than 60 seconds. There is no missed-slot backfill. A scheduler lock prevents multiple scheduler processes; a separate pipeline lock covers manual and scheduled work together. Daily limits count non-dry-run attempts including failed jobs, conservatively capped at three.
+APScheduler in-process cron triggers run at up to ten daily slots in Asia/Kolkata. No scheduler job store is needed: triggers are fixed configuration, while handled slots persist in SQLite. Misfire grace is 55 seconds, and the callback independently rejects slots older than 60 seconds. There is no missed-slot backfill. A scheduler lock prevents multiple scheduler processes; a separate pipeline lock covers manual and scheduled work together. Daily limits count non-dry-run attempts including failed jobs, capped at ten by default.
 
 The machine must remain awake. Restart the scheduler through Task Scheduler/systemd if desired; use exactly one launcher. Failed jobs do not automatically spin forever; retries are bounded within providers and generation. Logs rotate. FFmpeg streams video, encodes one scene at a time with two threads, and does not load footage into Python memory. Downloads have byte limits; final output and cache cleanup remain conservative.
 
@@ -42,3 +42,9 @@ The machine must remain awake. Restart the scheduler through Task Scheduler/syst
 The evidence layer is stricter than many news bots, yet cannot prove truth. Source text is externally retrieved, exact quotations are checked, publishers are grouped conservatively and numbers must appear in each corroborating quote. Semantic entailment and editorial value still involve a model, so private human review remains essential. Near-duplicate detection is lexical; paraphrased stories may evade it. Generic stock matching uses search terms and manifest tags, not a vision model.
 
 Caption timing is estimated within real measured scene audio, with no word forced alignment. The renderer supports crop-to-fill, gentle graphics zoom and short scene fades. It deliberately omits music mixing, blur-background layouts and complex transitions from this small version. This keeps the implementation maintainable; the code and documentation do not claim those optional effects were tested.
+
+## Local dashboard
+
+`dashboard.py` serves bundled HTML/CSS/JS with Python ThreadingHTTPServer on 127.0.0.1 only. A BackgroundScheduler uses the same scheduling function and exclusive scheduler lock as the standalone command. Manual requests use one worker and the existing pipeline lock; no distributed queue or second pipeline implementation exists. Pause state is saved beside SQLite and survives restart. Safe projections of jobs, events, sources, media credits and confirmed uploads are returned; OAuth objects, API keys, session URIs and raw logs are never returned. Host checks prevent DNS rebinding; same-origin controls require a per-process anti-CSRF token. File serving allows only final.mp4 and cover.png for valid job IDs, with path containment and byte-range support.
+
+`licensing.py` checks source domains and approved free-license records at acquisition, final validation and upload. Originals and the Pixabay/Pexels licenses are allowed; local imports require explicit CC0 or CC BY 4.0 declarations and attribution. The audit records the policy decision, not a guarantee of third-party ownership or releases. No arbitrary web image search or paid stock source is implemented.

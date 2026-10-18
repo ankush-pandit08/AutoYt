@@ -6,7 +6,7 @@ This report distinguishes executed local tests from untested live services. Upda
 
 - Python 3.12 virtual environment installed in `.venv`; `pip check` reported no broken requirements.
 - `ruff check src tests scripts` passed; Python source compilation passed.
-- **92 pytest tests passed**, including real FFmpeg rendering/decoding at a small test resolution with both generated graphics and animated JPEG photo B-roll. Provider boundary tests are distinguished from the live checks below. Final lint passed. Checks also cover public visibility, private history preservation, transactional database migration, compact Hindi model requests and pronunciation aliases that preserve exact on-screen package identifiers.
+- **103 pytest tests passed**, including real FFmpeg rendering/decoding at a small test resolution with both generated graphics and animated JPEG photo B-roll. Provider boundary tests are distinguished from the live checks below. Final lint passed. Checks also cover public visibility, private history preservation, transactional database migration, compact Hindi model requests and pronunciation aliases that preserve exact on-screen package identifiers.
 - Tests cover RSS parsing/relevance/ranking, duplicates, configuration, exact evidence/primary-source/independence/number checks, extraction/date conflict, script schema and bounded malformed-output retries, silent/clipped audio, missing voice model, graphical fallback, caption boundaries, process locks, SQLite checkpoint recovery, daily/slot limits, IST/missed-slot behavior, and dry-run orchestration.
 - Upload tests cover private metadata, duplicate prevention, 429/5xx backoff, authorization/quota failures, interrupted sessions, ambiguous initiation/reconciliation, privacy and processing gates, disabled uploads, dry-run blocking, revoked refresh credentials and changed files.
 - Live HTTP 200 responses were received from Google Trends India, Google Blog RSS, Microsoft Blog RSS and The Verge Atom feed. Live parsing accepted two fresh technology candidates at test time; only The Verge had qualifying stories in that 24-hour window.
@@ -30,7 +30,7 @@ This report distinguishes executed local tests from untested live services. Upda
 - **Pixabay live integration passed:** the locally saved key returned a suitable technology video, downloaded and probed successfully. Its public source is `https://pixabay.com/videos/id-14900/`; the key is excluded from saved artifacts and logs. A local 15.833-second 1080×1920 H.264/AAC preview combines this illustrative footage, the Hindi Kokoro narration and shaped animated Hindi captions. All media checks passed. This is a local voice/footage preview, not a new YouTube upload or a claim of successful automatic Hindi news writing.
 - Pexels live API access was not tested because no API key was supplied. Original graphics work without one; local assets require your licensed manifest.
 - Linux execution was not tested on this Windows host.
-- The three IST slots are configured and unit-tested. No OS scheduled task/systemd service was registered, and the AutoYT scheduler is not running. Start it after your local/private upload review; no past slots will be backfilled.
+- Ten IST slots and the daily attempt cap are configured and tested. The dashboard and scheduler run on localhost. A limited-privilege current-user Windows sign-in task was registered. Linux service deployment remains untested. Missed past slots are not backfilled.
 - Caption phrases are estimated within measured scene boundaries, not word forced alignment. Editorial/source checks remain imperfect automated filters. Optional music, blur layouts and advanced transitions are omitted.
 - Startup logs reported approximately 5.9 GiB total RAM. The initial 16K context probe exhausted memory; the application was changed to a configurable 4K context, three bounded source documents, two–three claims, compact writing evidence and immediate model unloading. The real 4K probe passed (`data/ollama-smoke-4k.json`). The earlier failed probe is retained separately in `data/ollama-smoke.json`. Memory pressure from other applications can still interrupt CPU inference.
 
@@ -45,3 +45,10 @@ This report distinguishes executed local tests from untested live services. Upda
 ```
 
 The live discovery result is time-dependent and may safely skip or fail research. Pytest temporary files use the workspace because Windows sandbox temporary-folder rename restrictions otherwise interfere with atomic artifact tests.
+
+## Dashboard and free-media policy
+
+- Full suite: 103 tests passed with local socket access; lint passed. HTTP tests verify loopback binding, hostile Host/Origin rejection, anti-CSRF checks, persistent pause state, complete daily counters and video byte ranges.
+- Existing media sets for three completed live jobs passed the recorded approved-free-license policy. This checks provenance records, not independent copyright ownership or model/property releases.
+- The live dashboard displayed actual SQLite jobs, configured Hindi voice, public upload mode, ten slots and local source/license credits. Browser pause/resume controls were exercised, and a real 49-second Short opened in the video player.
+- Windows sign-in startup was registered and its task configuration checked. A reboot/sign-in test has not been performed.

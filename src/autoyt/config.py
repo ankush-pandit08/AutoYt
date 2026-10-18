@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
     timezone: str = "Asia/Kolkata"
-    schedule_times: str = "08:00,14:00,20:00"
+    schedule_times: str = "06:00,07:40,09:20,11:00,12:40,14:20,16:00,17:40,19:20,21:00"
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3:4b-instruct"
     ollama_context_length: int = Field(default=4096, ge=4096, le=16384)
@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     duration_max: float = 60
     encoder_preset: str = "fast"
     crf: int = Field(default=20, ge=15, le=28)
-    max_videos_per_day: int = Field(default=3, ge=1, le=10)
+    max_videos_per_day: int = Field(default=10, ge=1, le=10)
     topic_dedup_days: int = Field(default=14, ge=1)
     min_free_gb: float = Field(default=2, ge=0)
     retention_days: int = Field(default=14, ge=1)
@@ -63,9 +63,11 @@ class Settings(BaseSettings):
     def check(self):
         ZoneInfo(self.timezone)
         slots = self.schedule_times.split(",")
-        if len(set(slots)) != 3:
-            raise ValueError("Configure exactly three distinct daily slots")
+        if not 1 <= len(slots) <= 10 or len(set(slots)) != len(slots):
+            raise ValueError("Configure one to ten distinct daily slots")
         for slot in slots:
+            if len(slot) != 5 or slot[2] != ":" or not slot.replace(":", "").isdigit():
+                raise ValueError("Schedule times must use HH:MM")
             h, m = map(int, slot.split(":"))
             if not (0 <= h <= 23 and 0 <= m <= 59):
                 raise ValueError("Invalid schedule time")
@@ -74,7 +76,7 @@ class Settings(BaseSettings):
         if self.video_width * 16 != self.video_height * 9 or self.video_width % 2:
             raise ValueError("Video dimensions must be even 9:16")
         if self.enable_upload and not self.youtube_channel_id:
-            raise ValueError("Set YOUTUBE_CHANNEL_ID before enabling private uploads")
+            raise ValueError("Set YOUTUBE_CHANNEL_ID before enabling uploads")
         if not self.ollama_base_url.startswith(("http://127.0.0.1:", "http://localhost:")):
             raise ValueError("Ollama must run locally")
         return self

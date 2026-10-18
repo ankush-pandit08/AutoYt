@@ -50,7 +50,8 @@ def test_dry_run_full_pipeline_never_uploads(cfg, script, research_data, monkeyp
         (folder/"narration.wav").write_bytes(b"audio fixture")
         return [{"text": "test phrase", "start": 0, "end": 45}]
     monkeypatch.setattr(module.audio.Speech, "synthesize", speech)
-    monkeypatch.setattr(module.media, "choose_media", lambda *args: [{"attribution": "Test original graphic"}])
+    monkeypatch.setattr(module.media, "choose_media", lambda *args: [
+        {"kind": "graphics", "license": "Original AutoYT graphics", "attribution": "Test original graphic"}])
     monkeypatch.setattr(module.video, "subtitles", lambda *args: [{"start": 0, "end": 45}])
     monkeypatch.setattr(module.video, "render", lambda cfg, script, segments, assets, folder:
                         (folder/"final.mp4").write_bytes(b"video fixture"))

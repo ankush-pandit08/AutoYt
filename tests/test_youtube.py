@@ -62,6 +62,8 @@ def ready(cfg, script):
     (folder/"final.mp4").write_bytes(b"test network boundary fixture")
     write_json(folder/"validation.json", {"passed": True})
     store.update(job_id, "READY_TO_UPLOAD", stage=7, content_hash=digest(folder/"final.mp4"))
+    store.save(job_id, "media_assets", [{"kind": "graphics", "license": "Original AutoYT graphics",
+                                       "attribution": "Original graphics"}])
     store.save(job_id, "metadata", youtube.metadata(script, job_id, [{"attribution": "Original graphics"}]))
     return cfg, store, job_id, folder
 
@@ -81,6 +83,42 @@ def test_private_upload_and_idempotency(ready, monkeypatch):
     assert store.get(job_id)["state"] == "AWAITING_REVIEW"
     youtube.upload(cfg, store, job_id, folder)
     assert len(fake.inserts) == 1
+
+
+def test_unapproved_media_blocks_upload_before_network(ready, monkeypatch):
+    cfg, store, job_id, folder = ready
+    store.save(job_id, "media_assets", [{"kind": "stock_image", "license": "free",
+                                       "source_url": "https://unknown.example/photo", "attribution": "unknown"}])
+    def forbidden(*args):
+        pytest.fail("Unapproved media must stop before YouTube access")
+    monkeypatch.setattr(youtube, "service", forbidden)
+    with pytest.raises(ValueError, match="license"):
+        youtube.upload(cfg, store, job_id, folder)
+
+
+def test_cc_by_credits_required_at_upload(ready, script, monkeypatch):
+    cfg, store, job_id, folder = ready
+    asset = {"kind": "stock", "license": "CC-BY-4.0", "free_to_use": True,
+             "source_url": "https://creator.example/asset", "permitted_use": "Edited videos",
+             "license_url": "https://creativecommons.org/licenses/by/4.0/", "attribution": "Creator name"}
+    store.save(job_id, "media_assets", [asset])
+    with pytest.raises(ValueError, match="credits"):
+        youtube.upload(cfg, store, job_id, folder)
+    body = youtube.metadata(script, job_id, [asset])
+    assert all(value in body["snippet"]["description"] for value in (asset["attribution"], asset["license_url"], asset["source_url"]))
+    assert "Edited/cropped" in body["snippet"]["description"]
+
+
+def test_old_job_retry_cannot_exceed_daily_upload_cap(ready, monkeypatch):
+    cfg, store, job_id, folder = ready
+    for index in range(cfg.max_videos_per_day):
+        previous = store.create(dry_run=True)
+        store.confirm_upload(previous, f"previous-{index}", "public")
+    def forbidden(*args):
+        pytest.fail("Daily cap must stop a new upload before network access")
+    monkeypatch.setattr(youtube, "service", forbidden)
+    with pytest.raises(RuntimeError, match="daily upload limit"):
+        youtube.upload(cfg, store, job_id, folder)
 
 
 def test_authorized_public_upload_and_retry_keep_visibility(ready, script, monkeypatch):

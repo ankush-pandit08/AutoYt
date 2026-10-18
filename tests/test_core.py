@@ -47,7 +47,7 @@ def test_dedupe():
     assert not duplicate("Windows software update", ["Apple processor announcement"])
 
 
-@pytest.mark.parametrize("override", [{"youtube_privacy": "unlisted"}, {"schedule_times": "08:00,14:00"},
+@pytest.mark.parametrize("override", [{"youtube_privacy": "unlisted"}, {"schedule_times": ""},
     {"schedule_times": "08:00,08:00,20:00"}, {"enable_upload": True}, {"video_width": 1920},
     {"ollama_base_url": "https://paid-api.example"}, {"duration_min": 50}])
 def test_invalid_configuration(override):

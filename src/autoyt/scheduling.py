@@ -8,6 +8,14 @@ from apscheduler.triggers.cron import CronTrigger
 from .pipeline import Pipeline
 
 
+def configure(scheduler, cfg):
+    for slot in cfg.schedule_times.split(","):
+        hour, minute = map(int, slot.split(":"))
+        scheduler.add_job(scheduled_run, CronTrigger(hour=hour, minute=minute, timezone=cfg.timezone),
+                          args=[cfg, slot], id=slot, max_instances=1, coalesce=True, misfire_grace_time=55)
+    return scheduler
+
+
 def slot_key(cfg, moment):
     return moment.astimezone(ZoneInfo(cfg.timezone)).strftime("%Y-%m-%dT%H:%M")
 
@@ -30,11 +38,7 @@ def scheduled_run(cfg, expected=None, moment=None):
 def serve(cfg):
     cfg.prepare()
     with portalocker.Lock(str(cfg.database_path)+".scheduler.lock", timeout=0):
-        scheduler = BlockingScheduler(timezone=ZoneInfo(cfg.timezone))
-        for slot in cfg.schedule_times.split(","):
-            hour, minute = map(int, slot.split(":"))
-            scheduler.add_job(scheduled_run, CronTrigger(hour=hour, minute=minute, timezone=cfg.timezone),
-                              args=[cfg, slot], id=slot, max_instances=1, coalesce=True, misfire_grace_time=55)
+        scheduler = configure(BlockingScheduler(timezone=ZoneInfo(cfg.timezone)), cfg)
         try:
             scheduler.start()
         except (KeyboardInterrupt, SystemExit):

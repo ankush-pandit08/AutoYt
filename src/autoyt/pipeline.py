@@ -4,7 +4,7 @@ from contextlib import contextmanager
 
 import portalocker
 
-from . import ai, audio, discovery, media, research, video, youtube
+from . import ai, audio, discovery, licensing, media, research, video, youtube
 from .models import Research, Script, Topic
 from .net import Web
 from .store import Store, digest, write_json
@@ -145,6 +145,7 @@ class Pipeline:
                     script = Script.model_validate(db.load(job_id, "script"))
                     self._save(job_id, folder, "media_assets", media.choose_media(cfg, self.web, script))
                 elif index == 5:
+                    licensing.audit(db.load(job_id, "media_assets"))
                     script = Script.model_validate(db.load(job_id, "script"))
                     timings = video.subtitles(cfg, db.load(job_id, "timing"), folder)
                     self._save(job_id, folder, "caption_timing", timings)
@@ -153,6 +154,7 @@ class Pipeline:
                                                                             db.load(job_id, "media_assets"),
                                                                             cfg.youtube_privacy))
                 elif index == 6:
+                    self._save(job_id, folder, "media_license_audit", licensing.audit(db.load(job_id, "media_assets")))
                     script = Script.model_validate(db.load(job_id, "script"))
                     evidence = Research.model_validate(db.load(job_id, "research"))
                     research.verify_claims(evidence.claims, research.independent_sources(evidence.sources))

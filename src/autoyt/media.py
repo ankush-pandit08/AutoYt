@@ -4,6 +4,7 @@ import logging
 
 from .audio import probe
 from .discovery import words
+from .licensing import audit, check_asset
 from .pixabay import acquire as pixabay_asset
 
 log = logging.getLogger(__name__)
@@ -22,6 +23,10 @@ def choose_media(cfg, web, script):
                  "attribution": "Original explanatory graphics", "path": None, "source_url": None}
         for entry in local:
             if not entry.get("license") or not entry.get("source_url") or not entry.get("permitted_use"):
+                continue
+            try:
+                check_asset({**entry, "kind": "stock"})
+            except ValueError:
                 continue
             path = (cfg.local_media_manifest.parent / entry["file"]).resolve()
             if not path.is_relative_to(cfg.local_media_manifest.parent.resolve()):
@@ -73,4 +78,5 @@ def choose_media(cfg, web, script):
                 pixabay_failed = True
                 log.warning("Pixabay unavailable (%s); using original graphics", type(error).__name__)
         result.append(asset)
+    audit(result)
     return result

@@ -2,7 +2,9 @@
   {
     "file": "processor.mp4",
     "tags": ["processor", "computer", "chip"],
-    "license": "Your verified license name and URL",
+    "license": "CC-BY-4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "free_to_use": true,
     "source_url": "https://your-original-source.example/asset",
     "permitted_use": "YouTube editing and redistribution in final videos",
     "attribution": "Required attribution text"

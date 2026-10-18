@@ -163,3 +163,11 @@ class Store:
         with self.connect() as db:
             db.execute("INSERT OR IGNORE INTO youtube_uploads VALUES(?,?,?,?)",
                        (job_id, video_id, privacy, now()))
+
+    def daily_upload_count(self, tz):
+        from zoneinfo import ZoneInfo
+        zone = ZoneInfo(tz)
+        today = datetime.now(zone).date()
+        with self.connect() as db:
+            return sum(datetime.fromisoformat(row[0]).astimezone(zone).date() == today
+                       for row in db.execute("SELECT uploaded_at FROM youtube_uploads"))

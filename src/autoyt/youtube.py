@@ -54,7 +54,14 @@ def metadata(script, job_id, assets, privacy="private"):
     language = "hi" if any("\u0900" <= c <= "\u097f" for c in script.script) else "en"
     description = script.description + "\n\n" + " ".join(script.hashtags)
     description += "\n\nSources:\n" + "\n".join(script.source_urls)
-    description += "\n\nVisuals are illustrative.\n" + "\n".join(sorted({a["attribution"] for a in assets}))
+    credits = set()
+    for asset in assets:
+        credit = asset["attribution"]
+        if asset.get("license") == "CC-BY-4.0":
+            credit += " | " + asset["license_url"] + " | Edited/cropped for this video"
+            credit += " | " + asset["source_url"]
+        credits.add(credit)
+    description += "\n\nVisuals are illustrative.\n" + "\n".join(sorted(credits))
     description += f"\n\nAutoYT job: {job_id}"
     if len(description) > 4900 or len(description.encode("utf-8")) > 4900:
         raise ValueError("YouTube description exceeds safe length")
@@ -135,8 +142,19 @@ def upload(cfg, store, job_id, folder):
     from .store import digest
     if job["content_hash"] != digest(folder / "final.mp4"):
         raise ValueError("Video changed after validation")
-    youtube, channel = service(cfg)
+    from .licensing import audit
+    assets = store.load(job_id, "media_assets")
+    license_audit = audit(assets)
+    description = store.load(job_id, "metadata")["snippet"]["description"]
+    for asset in assets:
+        if asset.get("license") == "CC-BY-4.0" and any(
+                value not in description for value in (asset["attribution"], asset["license_url"], asset["source_url"])):
+            raise ValueError("CC BY media requires creator, source and license credits in the upload description")
+    store.save(job_id, "media_license_audit", license_audit)
     attempt = store.attempt(job_id)
+    if not attempt and store.daily_upload_count(cfg.timezone) >= cfg.max_videos_per_day:
+        raise RuntimeError("CONFIGURATION: daily upload limit reached; retry this saved job another day")
+    youtube, channel = service(cfg)
     if attempt and attempt["video_id"]:
         return confirm(youtube, store, job_id, attempt["video_id"])
     if attempt and not attempt["session_uri"]:
