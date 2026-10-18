@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -22,8 +23,14 @@ class Settings(BaseSettings):
     ollama_embedding_model: str = "all-minilm:22m"
     ollama_context_length: int = Field(default=4096, ge=4096, le=16384)
     ollama_generation_timeout_seconds: int = Field(default=600, ge=60, le=1800)
-    tts_engine: Literal["kokoro", "sapi", "piper", "gemini"] = "kokoro"
+    tts_engine: Literal["kokoro", "sapi", "piper", "gemini", "indicf5"] = "kokoro"
     gemini_tts_model: str = Field(default="gemini-3.8-flash-tts", pattern=r"^[a-zA-Z0-9._-]+$")
+    indicf5_python: Path = Path(".venv-indicf5/Scripts/python.exe" if os.name == "nt" else ".venv-indicf5/bin/python")
+    indicf5_model_dir: Path = Path("data/models/indicf5")
+    indicf5_reference_audio: Path = Path("data/voices/indicf5-reference.wav")
+    indicf5_reference_text_file: Path = Path("data/voices/indicf5-reference.txt")
+    indicf5_steps: int = Field(default=16, ge=8, le=64)
+    indicf5_timeout_seconds: int = Field(default=3600, ge=60, le=7200)
     tts_voice: str = "af_heart"
     tts_speed: float = Field(default=1.0, ge=0.85, le=1.15)
     narration_language: Literal["en", "hi"] = "en"

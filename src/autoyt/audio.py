@@ -51,7 +51,10 @@ class Speech:
         self.pipeline = None
 
     def segment(self, text, path):
-        if self.cfg.tts_engine == "gemini":
+        if self.cfg.tts_engine == "indicf5":
+            from .indicf5_speech import segment
+            segment(self.cfg, text, path)
+        elif self.cfg.tts_engine == "gemini":
             from .gemini_speech import segment
             segment(self.cfg, text, path)
         elif self.cfg.tts_engine == "kokoro":
@@ -94,9 +97,14 @@ class Speech:
 
     def synthesize(self, script, folder):
         segments, arrays, offset = [], [], 0.0
+        if self.cfg.tts_engine == "indicf5":
+            from .indicf5_speech import generate
+            generate(self.cfg, [(scene.narration, folder / f"voice-{i:02d}.wav")
+                                for i, scene in enumerate(script.scenes)])
         for index, scene in enumerate(script.scenes):
             path = folder / f"voice-{index:02d}.wav"
-            self.segment(scene.narration, path)
+            if self.cfg.tts_engine != "indicf5":
+                self.segment(scene.narration, path)
             check_audio(path)
             audio, rate = sf.read(path, dtype="float32")
             if audio.ndim > 1:

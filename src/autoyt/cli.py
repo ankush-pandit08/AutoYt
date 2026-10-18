@@ -39,7 +39,12 @@ def doctor(cfg):
             checks["evidence_embeddings"] = "OK" if cfg.ollama_embedding_model in names else "MODEL MISSING: ollama pull " + cfg.ollama_embedding_model
         except Exception:
             checks["ollama"] = "UNAVAILABLE: install/start local Ollama"
-    if cfg.tts_engine == "gemini":
+    if cfg.tts_engine == "indicf5":
+        ready = (cfg.indicf5_python.is_file() and (cfg.indicf5_model_dir / "provenance.json").is_file()
+                 and cfg.indicf5_reference_audio.is_file() and cfg.indicf5_reference_text_file.is_file())
+        checks["tts"] = "IndicF5 local CPU configured; run doctor --tts-test" if ready else "MISSING: see IndicF5 in SETUP.md"
+        checks["voice"] = cfg.tts_voice + " / IndicF5 Hinglish"
+    elif cfg.tts_engine == "gemini":
         checks["tts"] = "Gemini speech key configured; run doctor --tts-test" if cfg.gemini_api_key else "REQUIRED: GEMINI_API_KEY"
         checks["voice"] = cfg.tts_voice + " / " + cfg.gemini_tts_model
     elif cfg.tts_engine == "kokoro":

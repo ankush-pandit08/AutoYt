@@ -154,3 +154,34 @@ Concise scripts may contain 60–115 words; the prompt targets 85–100 words. T
 Stock selection checks meaningful provider tags and omits generic search fillers such as “close up.” Unrelated matches fall back to original explanatory graphics. Licensing and visual relevance are separate checks; provider metadata alone is not a guarantee of accurate imagery.
 
 The YouTube transport preserves HTTP 308 as resumable progress while setting a bounded timeout. If a rejected render already has a pending upload, an explicit upload block preserves its recovery record until cancellation/deletion has been reconciled. A corrected render must not be resumed into the prior upload session. Cancelled video IDs can be excluded from reconciliation to avoid selecting stale playlist entries.
+
+
+### Local IndicF5 Hinglish narration
+
+IndicF5 replaces only speech generation; Gemini script writing and fact audits still use the configured API and its quotas. This integration uses the public Hindi-English code-switch model at a pinned revision, with no hosted voice API calls. Hindi words should remain in Devanagari and English tech terms in Latin letters.
+
+On Windows, from the project folder:
+
+```powershell
+python -m venv .venv-indicf5
+.venv-indicf5/Scripts/python.exe -m pip install torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+.venv-indicf5/Scripts/python.exe -m pip install -r requirements-indicf5.txt
+.venv/Scripts/python.exe scripts/setup_indicf5.py
+```
+
+On Linux, use `.venv-indicf5/bin/python` for the isolated environment and `.venv/bin/python` for AutoYT. CPU inference works without NVIDIA hardware. The model is approximately 1.35 GB; runtime packages use additional disk and RAM. Generation can take several minutes on a low-memory CPU machine. One isolated worker loads the model for all scenes and exits before video rendering. No Torch dependencies are added to AutoYT's main environment.
+
+Place an authorized clean 1–10 second male reference WAV at `data/voices/indicf5-reference.wav`, and its exact spoken transcript at `data/voices/indicf5-reference.txt`. A saved, approved synthetic narration sample may be reused; retain its provenance locally. The model's bundled reference voices are not used automatically.
+
+Set in `.env` after the runtime and model are ready:
+
+```dotenv
+TTS_ENGINE=indicf5
+TTS_VOICE=male_reference
+INDICF5_STEPS=16
+INDICF5_TIMEOUT_SECONDS=3600
+```
+
+Optional overrides: `INDICF5_PYTHON`, `INDICF5_MODEL_DIR`, `INDICF5_REFERENCE_AUDIO`, `INDICF5_REFERENCE_TEXT_FILE`. Run `python -m autoyt doctor --tts-test` to generate and validate a voice sample. The engine caches audio by exact text, reference audio/transcript, model manifest, steps and speed. It runs with Hugging Face offline mode and loads reviewed local code and model files. It never falls back to Gemini narration. Failed inference reports a configuration error; timeout preserves completed audio for retry. Inference diagnostics are saved locally in `data/cache/indicf5-worker-error.log`.
+
+Model: https://huggingface.co/Tharshan/indicf5_hindi-english_code_switch (Apache-2.0); vocoder: https://huggingface.co/charactr/vocos-mel-24khz. Weight and provenance files stay out of GitHub. Higher step counts can improve quality at the cost of CPU time. Final videos still need to pass the existing audio and duration checks.
