@@ -61,7 +61,9 @@ class Settings(BaseSettings):
                             "https://www.theverge.com/rss/index.xml", "https://techcrunch.com/feed/",
                             "https://feeds.arstechnica.com/arstechnica/index",
                             "https://openai.com/news/rss.xml", "https://www.bleepingcomputer.com/feed/",
-                            "https://www.securityweek.com/feed/", "https://feeds.feedburner.com/TheHackersNews"]
+                            "https://www.securityweek.com/feed/", "https://feeds.feedburner.com/TheHackersNews",
+                            "https://www.engadget.com/rss.xml", "https://www.androidauthority.com/feed/",
+                            "https://9to5google.com/feed/"]
     primary_domains: list[str] = ["blog.google", "blogs.microsoft.com", "microsoft.com", "openai.com",
                                   "apple.com", "developer.android.com", "nvidia.com", "cisa.gov",
                                   "android-developers.googleblog.com", "blog.chromium.org",

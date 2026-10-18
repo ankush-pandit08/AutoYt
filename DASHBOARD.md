@@ -17,3 +17,5 @@ Ten slots are scheduled from 06:00 to 21:00 Asia/Kolkata. Edit `SCHEDULE_TIMES` 
 For a server, see [SERVER.md](SERVER.md). Keep the loopback binding and access it through SSH forwarding. Do not expose port 8765 to the internet. The UI deliberately shows no keys, OAuth tokens or resumable session URIs. New OAuth consent still uses `python -m autoyt auth`.
 
 Unattended writing remains unvalidated on the tested low-memory machine. The dashboard reports failures; the existence of a scheduler does not establish that ten verified stories can be produced every day.
+
+Research failures show per-source outcomes in run details, including blocked HTTP responses and stale or undated pages. Discovery checks up to twelve candidate stories per live run. New feeds broaden coverage, while publication still requires recent official and independent corroboration. Some days have too few verifiable fresh stories to publish.

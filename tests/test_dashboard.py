@@ -126,3 +126,19 @@ def test_free_licensed_media_audit():
          "license": "Pexels License https://www.pexels.com/license/", "attribution": "Creator on Pexels"},
     ])
     assert result["passed"] and len(result["assets"]) == 3
+
+
+def test_run_notice_explains_failure(cfg, monkeypatch):
+    from types import SimpleNamespace
+
+    app = Dashboard(cfg)
+    job = app.store.create()
+    app.store.update(job, "FAILED", error="No verified story available; official source missing")
+    monkeypatch.setattr("autoyt.dashboard.Pipeline", lambda cfg: SimpleNamespace(
+        create_run=lambda **kwargs: job))
+    try:
+        app._run("run", None)
+        assert "official source missing" in app.notice
+        assert "Run finished" not in app.notice
+    finally:
+        app.close()

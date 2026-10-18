@@ -1,3 +1,4 @@
+import json
 import logging
 import shutil
 from contextlib import contextmanager
@@ -140,7 +141,7 @@ class Pipeline:
                     previous = db.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
                     previous = [title for title in previous if title != selected.title]
                     failures = []
-                    for candidate in choices[:6]:
+                    for candidate in choices[:12]:
                         if not 0 <= (datetime.now(timezone.utc)-candidate.published_at).total_seconds() <= 86400:
                             failures.append({"topic": candidate.title, "reason": "Discovery story is no longer within 24 hours"})
                             self._save(job_id, folder, "research_attempts", failures)
@@ -150,7 +151,10 @@ class Pipeline:
                         try:
                             result = research.research(cfg, self.web, self.llm, candidate, candidates, folder)
                         except ValueError as error:
-                            failures.append({"topic": candidate.title, "reason": str(error)[:300]})
+                            retrieval_path = folder / "source_retrievals.json"
+                            retrievals = json.loads(retrieval_path.read_text(encoding="utf-8")) if retrieval_path.is_file() else []
+                            failures.append({"topic": candidate.title, "reason": str(error)[:300],
+                                             "sources": retrievals})
                             self._save(job_id, folder, "research_attempts", failures)
                             log.info("Research candidate rejected: %s", str(error)[:150])
                             continue
@@ -159,7 +163,9 @@ class Pipeline:
                         db.update(job_id, STAGES[index], topic=candidate.title)
                         break
                     else:
-                        raise ValueError("No discovered story passed evidence checks; see research_attempts.json")
+                        raise ValueError("No verified story available among " + str(len(failures))
+                                         + " checked topics. Open run details for source access and evidence failures; "
+                                         "retry later when fresh official coverage is available.")
                     self._save(job_id, folder, "research", result)
                 elif index == 2:
                     revision_path = folder / "script_revision.json"

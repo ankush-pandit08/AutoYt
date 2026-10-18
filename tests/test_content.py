@@ -156,3 +156,37 @@ def test_updated_vendor_advisory_preserves_publication_date(cfg, monkeypatch):
     assert source.date_basis == "dated_advisory_heading"
     with pytest.raises(ValueError, match="Stale"):
         extract("https://other.example/advisories", "html", cfg)
+
+
+def test_source_access_failure_is_saved_without_raw_exception(cfg, tmp_path):
+    import json
+    from types import SimpleNamespace
+
+    from autoyt.research import research
+    request = httpx.Request("GET", "https://news.example/article")
+    response = httpx.Response(403, request=request)
+    def blocked(url):
+        raise httpx.HTTPStatusError("PRIVATE_API_SECRET", request=request, response=response)
+    topic = SimpleNamespace(url=str(request.url), published_at=datetime.now(timezone.utc),
+                            related_urls=[], title="Google processor software update")
+    with pytest.raises(ValueError, match="0 official and 0 independent"):
+        research(cfg, SimpleNamespace(article=blocked), None, topic, [], tmp_path)
+    records = json.loads((tmp_path/"source_retrievals.json").read_text())
+    assert records == [{"url": str(request.url), "result": "Source returned HTTP 403"}]
+    assert "PRIVATE_API_SECRET" not in json.dumps(records)
+
+
+def test_stale_official_source_is_reported_and_still_rejected(cfg, tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    from autoyt.research import research
+    topic = SimpleNamespace(url="https://blog.google/article", published_at=datetime.now(timezone.utc),
+                            related_urls=[], title="Google processor software update")
+    def stale(*args):
+        raise ValueError("Stale or future source date")
+    monkeypatch.setattr("autoyt.research.extract", stale)
+    with pytest.raises(ValueError, match="Evidence incomplete"):
+        research(cfg, SimpleNamespace(article=lambda url: "html"), None, topic, [], tmp_path)
+    records = json.loads((tmp_path/"source_retrievals.json").read_text())
+    assert records[0]["result"] == "Stale or future source date"

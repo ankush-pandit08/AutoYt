@@ -328,6 +328,7 @@ def research(cfg, web, llm, topic, candidates, folder=None):
     urls.extend((t.url, t.published_at) for t in candidates
                 if t.url != topic.url and similarity(topic.title, t.title) >= .35)
     sources, seen = [], set()
+    retrievals = []
     index = 0
     while index < len(urls) and index < 16 and len(sources) < 6:
         url, hint = urls[index]
@@ -340,16 +341,38 @@ def research(cfg, web, llm, topic, candidates, folder=None):
             source = extract(url, html, cfg, hint)
             threshold = .25 if source.primary else .4
             if similarity(topic.title, source.title + " " + source.text) < threshold:
+                retrievals.append({"url": url, "result": "Article is not sufficiently related to this story"})
                 continue
             sources.append(source)
+            retrievals.append({"url": url, "result": "Accepted official source" if source.primary else "Accepted independent source"})
             parser = Links()
             parser.feed(html)
             # Follow cited official announcements, never arbitrary links across the web.
             urls.extend((urljoin(url, link), None) for link in parser.links
                         if primary(urljoin(url, link), cfg) and urljoin(url, link) not in seen)
-        except Exception:
+        except Exception as error:
+            # Persist only controlled diagnostics; HTTP exception strings may contain credentials.
+            import httpx
+            if isinstance(error, httpx.HTTPStatusError):
+                reason = f"Source returned HTTP {error.response.status_code}"
+            elif type(error) is ValueError and str(error) in (
+                    "Insufficient article text", "Undated source rejected", "Stale or future source date",
+                    "Conflicting publication dates", "Source disallows automated retrieval",
+                    "Cannot establish article access permission"):
+                reason = str(error)
+            else:
+                reason = "Source retrieval unavailable (" + type(error).__name__ + ")"
+            retrievals.append({"url": url, "result": reason})
             continue
-    accepted = independent_sources(sources)
+    if folder:
+        write_json(folder/"source_retrievals.json", retrievals)
+    try:
+        accepted = independent_sources(sources)
+    except ValueError:
+        primary_count = sum(source.primary for source in sources)
+        independent_count = len({source.publisher for source in sources if not source.primary})
+        raise ValueError(f"Evidence incomplete: {primary_count} official and {independent_count} independent "
+                         "sources accepted; need two independent publishers including a recent official source") from None
     sources, families = [], set()
     for source in sorted(accepted, key=lambda s: (s.primary, s.updated_at or s.published_at), reverse=True):
         if source.publisher not in families:

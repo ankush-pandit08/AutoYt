@@ -95,7 +95,14 @@ class Dashboard:
         try:
             runner = Pipeline(self.cfg)
             result = runner.retry(job_id) if action == "retry" else runner.create_run(dry_run=action == "preview")
-            self.notice = "Run finished; see its result below." if result else "No new run started; check the saved job state."
+            if result:
+                job = self.store.get(result)
+                if job["state"] in ("FAILED", "SKIPPED"):
+                    self.notice = "Run stopped: " + (job["error"] or "No eligible story available.")
+                else:
+                    self.notice = "Run finished; see its result below."
+            else:
+                self.notice = "No new run started; check the saved job state."
         except Exception as error:
             self.notice = f"Run stopped ({type(error).__name__}). Check the job and run doctor."
 
