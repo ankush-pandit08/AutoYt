@@ -259,15 +259,88 @@ def test_missing_oauth(cfg):
 
 
 def test_revoked_refresh(cfg, monkeypatch):
+    from google.auth.exceptions import RefreshError
     from google.oauth2.credentials import Credentials
     cfg.youtube_token_file.parent.mkdir()
     cfg.youtube_token_file.write_text(json.dumps({"refresh_token": "test"}))
     def fail(*args):
-        raise RuntimeError("secret refresh failure")
+        raise RefreshError("invalid_grant", {"error": "invalid_grant"})
     credentials = SimpleNamespace(expired=True, refresh_token="test", refresh=fail)
     monkeypatch.setattr(Credentials, "from_authorized_user_file", lambda *args: credentials)
     with pytest.raises(RuntimeError, match="revoked"):
         youtube.service(cfg)
+
+
+@pytest.mark.parametrize("kind", ["transport", "server"])
+def test_temporary_refresh_failure_is_not_reported_as_revoked(cfg, monkeypatch, kind):
+    from google.auth.exceptions import RefreshError, TransportError
+    from google.oauth2.credentials import Credentials
+
+    cfg.youtube_token_file.parent.mkdir()
+    cfg.youtube_token_file.write_text("{}")
+    calls = []
+    def fail(*args):
+        calls.append(1)
+        if kind == "transport":
+            raise TransportError("PRIVATE_TRANSPORT_DETAILS")
+        raise RefreshError("PRIVATE_TRANSPORT_DETAILS", retryable=True)
+    credentials = SimpleNamespace(expired=True, refresh_token="test", refresh=fail)
+    monkeypatch.setattr(Credentials, "from_authorized_user_file", lambda *args: credentials)
+    monkeypatch.setattr(youtube.time, "sleep", lambda _: None)
+    with pytest.raises(RuntimeError, match="TRANSIENT:") as caught:
+        youtube.service(cfg)
+    assert len(calls) == 3
+    assert "revoked" not in str(caught.value)
+    assert "PRIVATE_TRANSPORT_DETAILS" not in str(caught.value)
+
+
+def test_transient_refresh_recovers_and_saves_token(cfg, monkeypatch):
+    from google.auth.exceptions import TransportError
+    from google.oauth2.credentials import Credentials
+
+    cfg.youtube_channel_id = "channel-123"
+    cfg.youtube_token_file.parent.mkdir()
+    cfg.youtube_token_file.write_text("{}")
+    calls = []
+    def refresh(*args):
+        calls.append(1)
+        if len(calls) == 1:
+            raise TransportError("Temporary network outage")
+    credentials = SimpleNamespace(expired=True, valid=True, refresh_token="test", refresh=refresh,
+                                  to_json=lambda: '{"refreshed":true}')
+    monkeypatch.setattr(Credentials, "from_authorized_user_file", lambda *args: credentials)
+    monkeypatch.setattr(youtube.time, "sleep", lambda _: None)
+    monkeypatch.setattr("googleapiclient.discovery.build", lambda *args, **kwargs:
+        SimpleNamespace(channels=lambda: SimpleNamespace(list=lambda **kwargs:
+            Execute({"items": [{"id": "channel-123"}]}))))
+    assert youtube.service(cfg)[1]["id"] == "channel-123"
+    assert len(calls) == 2
+    assert json.loads(cfg.youtube_token_file.read_text())["refreshed"]
+
+
+def test_auth_can_reopen_consent_after_invalid_grant(cfg, monkeypatch):
+    from google.auth.exceptions import RefreshError
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+
+    cfg.youtube_channel_id = "channel-123"
+    cfg.youtube_token_file.parent.mkdir()
+    cfg.youtube_token_file.write_text("{}")
+    cfg.youtube_client_secrets_file.write_text("{}")
+    def revoked(*args):
+        raise RefreshError("invalid_grant", {"error": "invalid_grant"})
+    old = SimpleNamespace(expired=True, refresh_token="test", refresh=revoked)
+    new = SimpleNamespace(valid=True, to_json=lambda: '{"fresh_consent":true}')
+    monkeypatch.setattr(Credentials, "from_authorized_user_file", lambda *args: old)
+    def flow(path, scopes):
+        assert scopes == youtube.SCOPES
+        return SimpleNamespace(run_local_server=lambda port: new)
+    monkeypatch.setattr(InstalledAppFlow, "from_client_secrets_file", flow)
+    monkeypatch.setattr("googleapiclient.discovery.build", lambda *args, **kwargs:
+        SimpleNamespace(channels=lambda: SimpleNamespace(list=lambda **kwargs:
+            Execute({"items": [{"id": "channel-123"}]}))))
+    assert youtube.service(cfg, interactive=True)[1]["id"] == "channel-123"
+    assert json.loads(cfg.youtube_token_file.read_text())["fresh_consent"]
 
 
 def test_service_transport_preserves_resumable_308_responses(cfg, monkeypatch):

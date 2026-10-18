@@ -13,6 +13,7 @@ SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googlea
 
 
 def service(cfg, interactive=False):
+    from google.auth.exceptions import RefreshError, TransportError
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
     from google_auth_httplib2 import AuthorizedHttp
@@ -25,10 +26,28 @@ def service(cfg, interactive=False):
     if token.is_file():
         credentials = Credentials.from_authorized_user_file(str(token), SCOPES)
     if credentials and credentials.expired and credentials.refresh_token:
-        try:
-            credentials.refresh(Request())
-        except Exception:
-            raise RuntimeError("CONFIGURATION: Google consent revoked or expired; run autoyt auth") from None
+        for attempt in range(3):
+            try:
+                credentials.refresh(Request())
+                break
+            except RefreshError as error:
+                codes = [value.get("error") for value in error.args if isinstance(value, dict)]
+                if "invalid_grant" in codes:
+                    if interactive:
+                        credentials = None
+                        break
+                    raise RuntimeError("CONFIGURATION: Google consent revoked or expired; run autoyt auth") from None
+                if not getattr(error, "retryable", False):
+                    raise RuntimeError("CONFIGURATION: Google token refresh rejected; check desktop OAuth client setup") from None
+                if attempt == 2:
+                    raise RuntimeError("TRANSIENT: Google authorization service unavailable; retry this saved job") from None
+            except TransportError:
+                if attempt == 2:
+                    raise RuntimeError("TRANSIENT: Cannot reach Google to refresh authorization; "
+                                       "check internet and retry this saved job") from None
+            except Exception:
+                raise RuntimeError("CONFIGURATION: Google token refresh failed; check local OAuth configuration") from None
+            time.sleep(2 ** attempt)
     if not credentials or not credentials.valid:
         if not interactive:
             raise RuntimeError("CONFIGURATION: initial OAuth consent required; run autoyt auth")
