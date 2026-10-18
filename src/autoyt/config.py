@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
     timezone: str = "Asia/Kolkata"
     schedule_times: str = "06:00,07:40,09:20,11:00,12:40,14:20,16:00,17:40,19:20,21:00"
+    daily_script_batch: bool = False
+    morning_plan_time: str = Field(default="05:00", pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
     ollama_base_url: str = "http://127.0.0.1:11434"
     llm_provider: Literal["ollama", "groq", "gemini"] = "ollama"
     gemini_api_key: str = Field(default="", repr=False)
@@ -79,6 +81,8 @@ class Settings(BaseSettings):
             h, m = map(int, slot.split(":"))
             if not (0 <= h <= 23 and 0 <= m <= 59):
                 raise ValueError("Invalid schedule time")
+        if self.daily_script_batch and self.morning_plan_time >= min(slots):
+            raise ValueError("Morning script preparation must start before the first video slot")
         if not (0 < self.duration_min <= self.video_duration_seconds <= self.duration_max):
             raise ValueError("Invalid duration tolerance")
         if self.video_width * 16 != self.video_height * 9 or self.video_width % 2:

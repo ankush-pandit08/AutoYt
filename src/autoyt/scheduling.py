@@ -9,11 +9,23 @@ from .pipeline import Pipeline
 
 
 def configure(scheduler, cfg):
+    if cfg.daily_script_batch:
+        hour, minute = map(int, cfg.morning_plan_time.split(":"))
+        scheduler.add_job(morning_plan, CronTrigger(hour=hour, minute=minute, timezone=cfg.timezone),
+                          args=[cfg], id="morning-plan", max_instances=1, coalesce=True, misfire_grace_time=55)
     for slot in cfg.schedule_times.split(","):
         hour, minute = map(int, slot.split(":"))
         scheduler.add_job(scheduled_run, CronTrigger(hour=hour, minute=minute, timezone=cfg.timezone),
                           args=[cfg, slot], id=slot, max_instances=1, coalesce=True, misfire_grace_time=55)
     return scheduler
+
+
+def morning_plan(cfg):
+    from .planning import prepare_day
+    try:
+        return prepare_day(cfg)
+    except portalocker.exceptions.LockException:
+        return None
 
 
 def slot_key(cfg, moment):
@@ -30,6 +42,13 @@ def scheduled_run(cfg, expected=None, moment=None):
     if not timedelta(0) <= local-due < timedelta(seconds=60):
         return None
     try:
+        if cfg.daily_script_batch:
+            from .planning import load_plan
+            plan = load_plan(cfg, moment)
+            entry = next((e for e in (plan or {}).get("entries", []) if e["slot"] == slot), None)
+            if entry is None:
+                return None  # Morning-only discovery: never replace a missing script at upload time.
+            return Pipeline(cfg).create_run(slot=slot_key(cfg, due), prepared=entry)
         return Pipeline(cfg).create_run(slot=slot_key(cfg, due))
     except portalocker.exceptions.LockException:
         return None

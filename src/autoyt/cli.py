@@ -94,7 +94,7 @@ def main(argv=None):
         cmd = sub.add_parser(name)
         cmd.add_argument("--dry-run", action="store_true")
         cmd.add_argument("--topic")
-    for name in ("scheduler", "status", "jobs", "list-jobs", "trends", "auth", "cleanup"):
+    for name in ("scheduler", "status", "jobs", "list-jobs", "trends", "auth", "cleanup", "plan-day"):
         sub.add_parser(name)
     for name in ("retry", "upload"):
         sub.add_parser(name).add_argument("job_id")
@@ -130,6 +130,10 @@ def main(argv=None):
             from .discovery import discover
             from .net import Web
             result = [t.model_dump(mode="json") for t in discover(cfg, Web())]
+        elif args.command == "plan-day":
+            from .planning import prepare_day
+            plan = prepare_day(cfg)
+            result = {"date": plan["date"], "state": plan["state"], "ready_scripts": len(plan["entries"])}
         elif args.command == "scheduler":
             from .scheduling import serve
             serve(cfg)

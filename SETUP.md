@@ -127,3 +127,14 @@ Hinglish uses Hindi sentence structure with common English tech words. Hindi is 
 ### Gemini API alternative
 
 Save `LLM_PROVIDER=gemini`, `GEMINI_API_KEY=your_key`, and `GEMINI_MODEL=gemini-3.8-flash` in `.env`. Gemini uses Google's structured JSON endpoint with local schema validation and the same factual/publication checks. Hosted mode does not load Ollama. Google lists a free tier for this model; account quotas still apply, and an account with paid billing can incur charges. Keep your project on the free tier for free-only operation. Public news evidence and scripts are sent to Google, whose free-tier terms allow use of content to improve products. OAuth and media keys are not sent. API keys stay in `.env`, excluded from Git. After changing settings, restart the dashboard. Keep automatic uploads paused until the connection and full video test succeed.
+
+
+### Morning-only script preparation
+
+Set `DAILY_SCRIPT_BATCH=true` and `MORNING_PLAN_TIME=05:00` to discover ranked technology stories and prepare up to ten distinct, verified Hinglish scripts once each morning. Preparation must start before the earliest video slot. At each `SCHEDULE_TIMES` slot, AutoYT uses its assigned saved script and research, then generates narration, sources licensed media, renders, validates and uploads. It does not rediscover topics or write replacement scripts at video time. Narration that exceeds the duration bounds stops safely rather than triggering new writing. Manual Run now and preview commands remain explicit on-demand workflows.
+
+The dashboard shows the morning plan and saved scripts. Plans are dated in the configured timezone and saved under `data/database/daily-plans`. Discovery snapshots and completed entries survive interruptions. If insufficient stories pass verification or API quotas are exhausted, the plan may contain fewer than ten scripts; missing slots are skipped. API failures do not trigger repeated daily discovery. An advanced manual `autoyt plan-day` command can initialize today's plan outside the normal schedule. A completed/failed daily plan is not regenerated automatically.
+
+Keep the machine awake with AutoYT running at 05:00. If morning preparation is missed, later video slots do not discover replacements. Old plans are never reused for a new day. Preparation and video generation share the same process lock; a still-busy preparation can cause an overlapping slot to be skipped. The morning list reflects the sources available then, rather than live trends throughout the day. The engaging script prompt uses a factual curiosity hook, immediate payoff, practical takeaway and a relevant comment question. It does not promise viral results.
+
+`scripts/preview_gemini_voice.py` generates an isolated Gemini TTS sample using the existing key without changing the scheduled voice. Use `--text-file` and `--output` for a script preview. Provider free-tier quotas apply.

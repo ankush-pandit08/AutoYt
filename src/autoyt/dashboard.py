@@ -101,6 +101,8 @@ class Dashboard:
 
     def snapshot(self):
         cfg = self.cfg
+        from .planning import load_plan
+        plan = load_plan(cfg) if cfg.daily_script_batch else None
         zone = ZoneInfo(cfg.timezone)
         today = datetime.now(zone).date()
         jobs = self.store.jobs()
@@ -127,6 +129,7 @@ class Dashboard:
                 "daily": {"attempts": len(daily), "uploaded": len(today_uploads),
                           "failed": sum(j["state"] == "FAILED" for j in daily), "limit": cfg.max_videos_per_day},
                 "settings": {"timezone": cfg.timezone, "slots": cfg.schedule_times.split(","),
+                             "daily_script_batch": cfg.daily_script_batch, "morning_plan_time": cfg.morning_plan_time,
                              "visibility": cfg.youtube_privacy, "uploads_enabled": cfg.enable_upload,
                              "language": cfg.narration_language, "voice": cfg.tts_voice,
                              "model": (cfg.gemini_model if cfg.llm_provider == "gemini" else
@@ -136,7 +139,12 @@ class Dashboard:
                 "next_run": upcoming[0] if upcoming and self.scheduler.state == 1 else None,
                 "disk_free_gb": round(shutil.disk_usage(cfg.output_dir).free / 1024**3, 1),
                 "jobs": jobs, "events": events,
-                "writing_warning": "Unattended script writing has not yet passed a full live run on this machine. Failed evidence or quality checks stop publication."}
+                "daily_plan": ({"date": plan["date"], "state": plan["state"], "error": plan.get("error"),
+                                "rejected": plan.get("rejected", []),
+                                "entries": [{"slot": e["slot"], "title": e["script"]["title"],
+                                             "script": e["script"]["script"]} for e in plan["entries"]]}
+                               if plan else None),
+                "writing_warning": "Trending sources guide topic selection. Engagement and virality are not guaranteed. Failed evidence or quality checks stop publication."}
 
     def detail(self, job_id):
         if not JOB_ID.fullmatch(job_id):

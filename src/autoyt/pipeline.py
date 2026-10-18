@@ -29,8 +29,14 @@ class Pipeline:
         self.web = Web()
         self.llm = ai.LLM(cfg)
 
-    def create_run(self, dry_run=False, topic=None, slot=None):
+    def create_run(self, dry_run=False, topic=None, slot=None, prepared=None):
         with pipeline_lock(self.cfg):
+            if prepared:
+                selected = Topic.model_validate(prepared["topic"])
+                evidence = Research.model_validate(prepared["research"])
+                script = Script.model_validate(prepared["script"])
+                research.verify_claims(evidence.claims, research.independent_sources(evidence.sources))
+                ai.validate_grounding(script, evidence)
             # Interrupted active work takes priority over creating another job.
             active = [j for j in self.store.jobs() if j["state"] in STAGES + ["CREATED", "UPLOADING"]]
             if active:
@@ -40,6 +46,19 @@ class Pipeline:
             job_id = self.store.create(dry_run, topic, slot, self.cfg.max_videos_per_day, self.cfg.timezone)
             if job_id:
                 self.store.save(job_id, "request", {"topic_filter": topic})
+                if prepared:
+                    folder = self.cfg.output_dir / job_id
+                    folder.mkdir(parents=True, exist_ok=True)
+                    self._save(job_id, folder, "morning_plan", {"date": slot[:10] if slot else None})
+                    if discovery.duplicate(selected.title, self.store.recent_topics(
+                            self.cfg.topic_dedup_days, self.cfg.youtube_privacy)):
+                        self.store.update(job_id, "SKIPPED", error="Morning story already covered")
+                        return job_id
+                    self.store.reserve_topic(job_id, selected.title, discovery.fingerprint(selected.title),
+                                             self.cfg.youtube_privacy)
+                    for name, value in (("topic", selected), ("research", evidence), ("script", script)):
+                        self._save(job_id, folder, name, value)
+                    self.store.update(job_id, "SCRIPTING", stage=3, topic=selected.title)
                 return self.execute(job_id)
             log.info("Slot already handled or daily limit reached")
 
@@ -164,6 +183,9 @@ class Pipeline:
                         duration = segments[-1]["end"]
                         if cfg.duration_min <= duration <= cfg.duration_max:
                             break
+                        if db.load(job_id, "morning_plan"):
+                            raise ValueError("Morning script narration outside duration limits; "
+                                             "no replacement script is generated at the video slot")
                         if (folder / "script_revision.json").is_file():
                             db.update(job_id, STAGES[index], stage=2)
                             raise ValueError(f"Reviewed narration measured {duration:.1f}s; revise "
