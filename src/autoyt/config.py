@@ -11,13 +11,20 @@ class Settings(BaseSettings):
     timezone: str = "Asia/Kolkata"
     schedule_times: str = "06:00,07:40,09:20,11:00,12:40,14:20,16:00,17:40,19:20,21:00"
     ollama_base_url: str = "http://127.0.0.1:11434"
+    llm_provider: Literal["ollama", "groq", "gemini"] = "ollama"
+    gemini_api_key: str = Field(default="", repr=False)
+    gemini_model: str = Field(default="gemini-3.8-flash", pattern=r"^[a-zA-Z0-9._-]+$")
+    groq_api_key: str = Field(default="", repr=False)
+    groq_model: str = "qwen/qwen3.8-27b"
     ollama_model: str = "qwen3:4b-instruct"
+    ollama_embedding_model: str = "all-minilm:22m"
     ollama_context_length: int = Field(default=4096, ge=4096, le=16384)
     ollama_generation_timeout_seconds: int = Field(default=600, ge=60, le=1800)
     tts_engine: Literal["kokoro", "sapi", "piper"] = "kokoro"
     tts_voice: str = "af_heart"
     tts_speed: float = Field(default=1.0, ge=0.85, le=1.15)
     narration_language: Literal["en", "hi"] = "en"
+    script_style: Literal["standard", "hinglish"] = "standard"
     kokoro_model: Path = Path("data/models/kokoro/kokoro-v1.0.int8.onnx")
     kokoro_voices: Path = Path("data/models/kokoro/voices-v1.0.bin")
     piper_model: Path = Path("assets/voices/en_US.onnx")
@@ -56,7 +63,8 @@ class Settings(BaseSettings):
                                   "apple.com", "developer.android.com", "nvidia.com", "cisa.gov",
                                   "android-developers.googleblog.com", "blog.chromium.org",
                                   "connectwise.com", "drupal.org", "npmjs.com", "safedep.io",
-                                  "github.com", "socket.dev"]
+                                  "github.com", "socket.dev", "huntress.com", "replit.com",
+                                  "cloudflare.com", "about.fb.com"]
     local_media_manifest: Path = Path("assets/footage/manifest.json")
 
     @model_validator(mode="after")

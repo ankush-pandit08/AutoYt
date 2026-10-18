@@ -8,18 +8,21 @@ try { $null = Invoke-RestMethod 'http://127.0.0.1:8765/api/status' -TimeoutSec 3
 if (-not $ready) {
     $logs = Join-Path $root 'data/logs'
     New-Item -ItemType Directory -Force -Path $logs | Out-Null
-    try { $null = Invoke-RestMethod 'http://127.0.0.1:11434/api/tags' -TimeoutSec 3 }
-    catch {
-        $portable = Join-Path $root 'data/tools/ollama/ollama.exe'
-        if (Test-Path -LiteralPath $portable) {
-            $launcher = Join-Path $PSScriptRoot 'start-ollama.ps1'
-            Start-Process powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$launcher`"") -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logs 'ollama-startup.log') -RedirectStandardError (Join-Path $logs 'ollama-startup-error.log')
-        } else {
-            $ollama = Get-Command ollama -ErrorAction SilentlyContinue
-            if ($ollama) {
-                $env:OLLAMA_HOST = '127.0.0.1:11434'
-                $env:OLLAMA_NO_CLOUD = '1'
-                Start-Process $ollama.Source -ArgumentList 'serve' -WorkingDirectory $root -WindowStyle Hidden
+    $provider = & $python -c "from autoyt.config import Settings; print(Settings().llm_provider)"
+    if ($provider -eq 'ollama') {
+        try { $null = Invoke-RestMethod 'http://127.0.0.1:11434/api/tags' -TimeoutSec 3 }
+        catch {
+            $portable = Join-Path $root 'data/tools/ollama/ollama.exe'
+            if (Test-Path -LiteralPath $portable) {
+                $launcher = Join-Path $PSScriptRoot 'start-ollama.ps1'
+                Start-Process powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$launcher`"") -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logs 'ollama-startup.log') -RedirectStandardError (Join-Path $logs 'ollama-startup-error.log')
+            } else {
+                $ollama = Get-Command ollama -ErrorAction SilentlyContinue
+                if ($ollama) {
+                    $env:OLLAMA_HOST = '127.0.0.1:11434'
+                    $env:OLLAMA_NO_CLOUD = '1'
+                    Start-Process $ollama.Source -ArgumentList 'serve' -WorkingDirectory $root -WindowStyle Hidden
+                }
             }
         }
     }

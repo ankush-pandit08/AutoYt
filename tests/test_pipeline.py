@@ -17,7 +17,7 @@ def test_empty_discovery_skips_without_upload(cfg, monkeypatch):
     assert runner.store.get(job_id)["state"] == "SKIPPED"
 
 
-def test_failed_stage_resumes_without_rediscovery(cfg, research_data, monkeypatch):
+def test_failed_research_refreshes_candidates_before_resuming(cfg, research_data, monkeypatch):
     topic = Topic(title="Google AI processor software update", url="https://a.example/doc",
                   published_at=datetime.now(timezone.utc), source="test")
     calls = []
@@ -30,9 +30,29 @@ def test_failed_stage_resumes_without_rediscovery(cfg, research_data, monkeypatc
     monkeypatch.setattr(module.research, "research", lambda *args: research_data)
     monkeypatch.setattr(module.ai, "generate", lambda *args: (_ for _ in ()).throw(ValueError("Stop at script")))
     Pipeline(cfg).retry(job_id)
-    assert len(calls) == 1
+    assert len(calls) == 2
     assert runner.store.get(job_id)["stage"] == 2
     assert runner.store.load(job_id, "research")["claims"]
+
+
+def test_research_tries_next_candidate_without_consuming_another_run(cfg, research_data, monkeypatch):
+    candidates = [Topic(title=title, url=f"https://example.com/{index}",
+                        published_at=datetime.now(timezone.utc), source="test")
+                  for index, title in enumerate(("Google AI processor update", "Microsoft cloud security update"))]
+    monkeypatch.setattr(module.discovery, "discover", lambda *args: candidates)
+    def research(*args):
+        if args[3].url == candidates[0].url:
+            raise ValueError("No independent evidence")
+        return research_data
+    monkeypatch.setattr(module.research, "research", research)
+    monkeypatch.setattr(module.ai, "generate", lambda *args: (_ for _ in ()).throw(ValueError("Stop at writer")))
+    runner = Pipeline(cfg)
+    job_id = runner.create_run()
+    assert len(runner.store.jobs()) == 1
+    assert runner.store.get(job_id)["topic"] == candidates[1].title
+    assert runner.store.get(job_id)["stage"] == 2
+    assert runner.store.load(job_id, "research_attempts")[0]["topic"] == candidates[0].title
+    assert candidates[0].title not in runner.store.recent_topics(14)
 
 
 def test_dry_run_full_pipeline_never_uploads(cfg, script, research_data, monkeypatch):

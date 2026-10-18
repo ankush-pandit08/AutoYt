@@ -26,13 +26,19 @@ def doctor(cfg):
             checks[binary] = "OK"
         except Exception:
             checks[binary] = "MISSING: install FFmpeg including ffprobe; set absolute paths in .env"
-    try:
-        response = httpx.get(cfg.ollama_base_url + "/api/tags", timeout=5)
-        response.raise_for_status()
-        names = {m["name"] for m in response.json()["models"]}
-        checks["ollama"] = "OK" if cfg.ollama_model in names else "MODEL MISSING: ollama pull " + cfg.ollama_model
-    except Exception:
-        checks["ollama"] = "UNAVAILABLE: install/start local Ollama"
+    if cfg.llm_provider == "gemini":
+        checks["llm"] = "Gemini key configured (not tested)" if cfg.gemini_api_key else "REQUIRED: GEMINI_API_KEY in .env"
+    elif cfg.llm_provider == "groq":
+        checks["llm"] = "Groq key configured (not tested)" if cfg.groq_api_key else "REQUIRED: GROQ_API_KEY in .env"
+    else:
+        try:
+            response = httpx.get(cfg.ollama_base_url + "/api/tags", timeout=5)
+            response.raise_for_status()
+            names = {m["name"] for m in response.json()["models"]}
+            checks["ollama"] = "OK" if cfg.ollama_model in names else "MODEL MISSING: ollama pull " + cfg.ollama_model
+            checks["evidence_embeddings"] = "OK" if cfg.ollama_embedding_model in names else "MODEL MISSING: ollama pull " + cfg.ollama_embedding_model
+        except Exception:
+            checks["ollama"] = "UNAVAILABLE: install/start local Ollama"
     if cfg.tts_engine == "kokoro":
         ready = importlib.util.find_spec("kokoro_onnx") and cfg.kokoro_model.is_file() and cfg.kokoro_voices.is_file()
         checks["tts"] = "Kokoro CPU installed; run doctor --tts-test" if ready else "MISSING: install .[tts] and run scripts/setup_kokoro.py"

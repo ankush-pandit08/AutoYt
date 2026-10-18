@@ -1,6 +1,7 @@
 import logging
 import shutil
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 import portalocker
 
@@ -38,6 +39,7 @@ class Pipeline:
                 return self.execute(active[-1]["id"])
             job_id = self.store.create(dry_run, topic, slot, self.cfg.max_videos_per_day, self.cfg.timezone)
             if job_id:
+                self.store.save(job_id, "request", {"topic_filter": topic})
                 return self.execute(job_id)
             log.info("Slot already handled or daily limit reached")
 
@@ -90,7 +92,7 @@ class Pipeline:
                         candidates = [Topic.model_validate(saved)]
                     else:
                         candidates = discovery.discover(cfg, self.web)
-                        previous = db.recent_topics(cfg.topic_dedup_days)
+                        previous = db.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
                         candidates = [t for t in candidates if not discovery.duplicate(t.title, previous)]
                         if job["topic"]:
                             candidates = [t for t in candidates if discovery.similarity(t.title, job["topic"]) >= .35]
@@ -101,12 +103,44 @@ class Pipeline:
                         self._save(job_id, folder, "candidates", [t.model_dump(mode="json") for t in candidates])
                     self._save(job_id, folder, "topic", candidates[0])
                     # A topic is reserved before research; failed stories do not repeatedly consume slots.
-                    db.reserve_topic(job_id, candidates[0].title, discovery.fingerprint(candidates[0].title))
+                    db.reserve_topic(job_id, candidates[0].title, discovery.fingerprint(candidates[0].title), cfg.youtube_privacy)
                     db.update(job_id, STAGES[index], topic=candidates[0].title)
                 elif index == 1:
-                    candidates = [Topic.model_validate(t) for t in db.load(job_id, "candidates")]
-                    result = research.research(cfg, self.web, self.llm,
-                                               Topic.model_validate(db.load(job_id, "topic")), candidates, folder)
+                    candidates = [Topic.model_validate(t) for t in (db.load(job_id, "candidates") or [])
+                                  if isinstance(t, dict)]
+                    if job["retries"]:
+                        fresh = discovery.discover(cfg, self.web)
+                        requested = (db.load(job_id, "request") or {}).get("topic_filter")
+                        if requested:
+                            fresh = [t for t in fresh if discovery.similarity(t.title, requested) >= .35]
+                        known = {t.url for t in candidates}
+                        candidates.extend(t for t in fresh if t.url not in known)
+                        self._save(job_id, folder, "candidates", [t.model_dump(mode="json") for t in candidates])
+                    selected = Topic.model_validate(db.load(job_id, "topic"))
+                    choices = [selected, *[t for t in candidates if t.url != selected.url]]
+                    previous = db.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
+                    previous = [title for title in previous if title != selected.title]
+                    failures = []
+                    for candidate in choices[:6]:
+                        if not 0 <= (datetime.now(timezone.utc)-candidate.published_at).total_seconds() <= 86400:
+                            failures.append({"topic": candidate.title, "reason": "Discovery story is no longer within 24 hours"})
+                            self._save(job_id, folder, "research_attempts", failures)
+                            continue
+                        if discovery.duplicate(candidate.title, previous):
+                            continue
+                        try:
+                            result = research.research(cfg, self.web, self.llm, candidate, candidates, folder)
+                        except ValueError as error:
+                            failures.append({"topic": candidate.title, "reason": str(error)[:300]})
+                            self._save(job_id, folder, "research_attempts", failures)
+                            log.info("Research candidate rejected: %s", str(error)[:150])
+                            continue
+                        self._save(job_id, folder, "topic", candidate)
+                        db.reserve_topic(job_id, candidate.title, discovery.fingerprint(candidate.title), cfg.youtube_privacy)
+                        db.update(job_id, STAGES[index], topic=candidate.title)
+                        break
+                    else:
+                        raise ValueError("No discovered story passed evidence checks; see research_attempts.json")
                     self._save(job_id, folder, "research", result)
                 elif index == 2:
                     revision_path = folder / "script_revision.json"
@@ -116,12 +150,13 @@ class Pipeline:
                         log.info("Using local editorial revision; all evidence checks still apply")
                     script = ai.generate(cfg, self.llm, Topic.model_validate(db.load(job_id, "topic")),
                                          Research.model_validate(db.load(job_id, "research")), **revision)
-                    for old in db.recent_scripts(cfg.topic_dedup_days, job_id):
+                    for old in db.recent_scripts(cfg.topic_dedup_days, job_id, cfg.youtube_privacy):
                         if discovery.duplicate(script.title, [old["title"]]) or \
                                 discovery.similarity(script.script, old["script"]) > .92:
                             raise ValueError("Script/title too similar to a recent generated video")
                     self._save(job_id, folder, "script", script)
                 elif index == 3:
+                    self.llm.release()
                     script = Script.model_validate(db.load(job_id, "script"))
                     speech = audio.Speech(cfg)
                     for revision in range(2):
@@ -139,6 +174,7 @@ class Pipeline:
                                              Research.model_validate(db.load(job_id, "research")),
                                              f"Measured {duration:.1f}s; target {cfg.video_duration_seconds}s. "
                                              "Adjust word count within 90–115 words, preserve verified facts.")
+                        self.llm.release()
                         self._save(job_id, folder, "script", script)
                     self._save(job_id, folder, "timing", segments)
                 elif index == 4:
@@ -186,3 +222,8 @@ class Pipeline:
             db.update(job_id, "FAILED", error=safe)
             log.error("Job %s: %s", job_id, safe)
             return job_id
+        finally:
+            try:
+                self.llm.release()
+            except RuntimeError:
+                log.warning("Local model could not be unloaded; its bounded keep-alive will expire")

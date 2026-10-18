@@ -19,7 +19,7 @@ def test_ollama_actionable_failures(cfg, monkeypatch, status, text, expected):
     with pytest.raises(RuntimeError, match=expected):
         LLM(cfg).structured(Audit, "test", {})
     assert len(calls) == (3 if status == 503 else 1)
-    assert calls[0]["json"]["keep_alive"] == 0
+    assert calls[0]["json"]["keep_alive"] == "2m"
     assert calls[0]["json"]["options"]["num_ctx"] == 4096
 
 
@@ -52,3 +52,35 @@ def test_hindi_prompt_preserves_unicode_without_escape_token_inflation(cfg, monk
     prompt = calls[0]["messages"][0]["content"]
     assert "हिंदी में तकनीक समझें।" in prompt
     assert r"\u0939" not in prompt
+
+
+def test_model_is_reused_between_text_calls_and_released_before_media(cfg, monkeypatch):
+    calls = []
+    def post(url, **kwargs):
+        calls.append((url, kwargs["json"]))
+        result = {"message": {"content": '{"supported":true,"reasons":[]}'}} if url.endswith("/chat") else {"done": True}
+        return httpx.Response(200, request=httpx.Request("POST", url), json=result)
+    monkeypatch.setattr(httpx, "post", post)
+    model = LLM(cfg)
+    model.structured(Audit, "test", {})
+    model.release()
+    model.release()
+    assert len(calls) == 2
+    assert calls[0][1]["keep_alive"] == "2m"
+    assert calls[1][0].endswith("/api/generate")
+    assert calls[1][1]["keep_alive"] == 0
+
+
+def test_passage_embeddings_are_local_cached_and_unloaded(cfg, monkeypatch):
+    calls = []
+    def post(url, **kwargs):
+        calls.append(kwargs["json"])
+        assert url == cfg.ollama_base_url + "/api/embed"
+        return httpx.Response(200, request=httpx.Request("POST", url), json={"embeddings": [[1, 0], [0, 1]]})
+    monkeypatch.setattr(httpx, "post", post)
+    model = LLM(cfg)
+    assert model.embeddings(["First exact passage.", "Second exact passage."]) == [[1, 0], [0, 1]]
+    model.embeddings(["First exact passage.", "Second exact passage."])
+    assert len(calls) == 1
+    assert calls[0]["keep_alive"] == 0
+    assert calls[0]["truncate"] is False

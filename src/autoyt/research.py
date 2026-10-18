@@ -1,10 +1,13 @@
 import hashlib
 import re
 from datetime import datetime, timezone
+from functools import lru_cache
 from html.parser import HTMLParser
 from typing import Literal
 from urllib.parse import urljoin, urlsplit
 
+import numpy as np
+import snowballstemmer
 import trafilatura
 from pydantic import BaseModel, Field, create_model
 from tld import get_fld
@@ -12,6 +15,16 @@ from tld import get_fld
 from .discovery import similarity, words
 from .models import Claim, Evidence, Research, Source
 from .store import write_json
+
+
+@lru_cache(maxsize=2048)
+def evidence_words(text):
+    # Match grammatical variants, while quotation and number checks remain exact.
+    ignored = {"we", "our", "their", "they", "them", "its", "was", "were", "has", "have", "had",
+               "been", "being", "also", "however", "company", "said", "says", "utc", "remain", "remains",
+               "january", "february", "march", "april", "may", "june", "july", "august",
+               "september", "october", "november", "december"}
+    return frozenset(snowballstemmer.stemmer("english").stemWords(sorted(words(text) - ignored)))
 
 
 def publisher(url):
@@ -85,6 +98,125 @@ class ClaimSelections(BaseModel):
     claim_ids: list[str] = Field(min_length=2, max_length=2)
 
 
+class AtomicProposal(BaseModel):
+    claim: str = Field(min_length=15, max_length=120, pattern=r"[.!?]$")
+    pair_id: str
+
+
+class AtomicProposals(BaseModel):
+    claims: list[AtomicProposal] = Field(min_length=2, max_length=2)
+
+
+def atomic_claims(llm, sources, topic, folder=None):
+    """Extract shared atomic facts; copy evidence from retrieved text, never model-written quotes."""
+    _, lookup = passages(sources)
+    pairs = []
+    def usable(text):
+        return (len(text) <= 500 and text.endswith((".", "!", "?", '"', '”'))
+                and not text.startswith(("|", "-", "•"))
+                and not re.match(r"From time to time|This (?:advisory|update)|At \d", text)
+                and not re.search(r"[a-f0-9]{8}-[a-f0-9]{4}-|\b\d{1,3}(?:(?:\.|\[\.\])\d{1,3}){3}\b", text, re.I))
+    semantic = {}
+    if hasattr(llm, "embeddings") and getattr(getattr(llm, "cfg", None), "llm_provider", "ollama") == "ollama":
+        eligible = [key for key, (s, text) in lookup.items() if usable(text)
+                    and (not s.primary or int(key.rsplit("p", 1)[1]) < 25)][:160]
+        vectors = np.asarray(llm.embeddings([lookup[key][1] for key in eligible]), dtype=float)
+        if vectors.ndim != 2 or not np.isfinite(vectors).all():
+            raise ValueError("Invalid local embedding vectors")
+        vectors /= np.maximum(np.linalg.norm(vectors, axis=1, keepdims=True), 1e-12)
+        similarities = vectors @ vectors.T
+        semantic = {(a, b): float(similarities[i, j]) for i, a in enumerate(eligible)
+                    for j, b in enumerate(eligible)}
+    topic_words = evidence_words(topic or "")
+    for primary_id, (source, text) in lookup.items():
+        position = int(primary_id.rsplit("p", 1)[1])
+        if not source.primary or position >= 25 or not usable(text):
+            continue
+        for independent_id, (other, quote) in lookup.items():
+            if other.primary or source.publisher == other.publisher or not usable(quote):
+                continue
+            overlap = evidence_words(text) & evidence_words(quote)
+            if len({w for w in overlap if not w.isdigit()}) >= 2:
+                score = (.5 * len(overlap) / max(1, min(len(evidence_words(text)), len(evidence_words(quote))))
+                         + .3 * min(1, len(overlap & topic_words) / 3) + .2 / (1 + position / 6))
+                if semantic:
+                    score = .85 * semantic.get((primary_id, independent_id), 0) + .15 * score
+                pairs.append((score, primary_id, independent_id))
+    pairs.sort(reverse=True)
+    distinct = []
+    seen_primary = set()
+    for pair in pairs:
+        if pair[1] not in seen_primary:
+            distinct.append(pair)
+            seen_primary.add(pair[1])
+        if len(distinct) == 8:
+            break
+    def context(item):
+        source, quote = item
+        index = source.text.find(quote)
+        line_start = source.text.rfind("\n", 0, index)
+        previous_start = source.text.rfind("\n", 0, max(0, line_start)) + 1
+        line_end = source.text.find("\n", index + len(quote))
+        line_end = len(source.text) if line_end < 0 else line_end
+        expanded = source.text[previous_start:line_end]
+        return source, expanded if len(expanded) <= 700 else quote
+    paired = {f"pair{i}": (context(lookup[a]), context(lookup[b])) for i, (_, a, b) in enumerate(distinct)}
+    if not paired:
+        raise ValueError("No overlapping primary and independent passages")
+    documents = [{"id": key, "primary_quote": a[1], "independent_quote": b[1]}
+                 for key, (a, b) in paired.items()]
+    if folder:
+        write_json(folder/"evidence_pairs.json", documents)
+    accepted, rejected_pairs = [], set()
+    feedback = None
+    for _ in range(3):
+        available = {key: pair for key, pair in paired.items() if key not in rejected_pairs}
+        if not available:
+            break
+        proposal_schema = create_model("PairedAtomicProposal", claim=(str, Field(
+            min_length=15, max_length=120, pattern=r"[.!?]$")), pair_id=(Literal[tuple(available)], ...))
+        remaining = 2-len(accepted)
+        schema = create_model("PairedAtomicProposals", claims=(
+            list[proposal_schema], Field(min_length=remaining, max_length=remaining)))
+        result = llm.structured(schema,
+            "Extract the requested number of DIFFERENT concise factual sentences from the supplied evidence PAIRS. "
+            "Every fact must be independently supported by BOTH quotations in its pair. "
+            "Write ONE fact per sentence, at most TWELVE WORDS. End with a period. "
+            "Focus on the central event or current service status. Preserve uncertainty and negation. "
+            "No dates, times, counts, identifiers or causal chains. No product-name fragments. "
+            "Do not append claims from only one quotation. Keep accepted claims unchanged and do not repeat them. "
+            "Choose pair_id from the available pairs. The program copies the original exact quotations.",
+            {"topic": topic, "pairs": [item for item in documents if item["id"] in available],
+             "accepted_claims": [c.claim for c in accepted], "previous_failures": feedback})
+        failures = []
+        for proposal in result.claims:
+            try:
+                if not any(word[:1].islower() for word in proposal.claim.split()):
+                    raise ValueError("Product-name fragment is not a complete fact")
+                if proposal.pair_id not in available:
+                    raise ValueError("Unknown evidence pair ID")
+                (primary_source, primary_text), (other, other_text) = available[proposal.pair_id]
+                claim = Claim(claim=proposal.claim, attribution=primary_source.publisher, evidence=[
+                    Evidence(source_url=primary_source.url, quote=primary_text),
+                    Evidence(source_url=other.url, quote=other_text)])
+                verify_claims([claim], sources)
+                if any(similarity(claim.claim, old.claim) > .85 for old in accepted):
+                    raise ValueError("Choose a different fact from the accepted claim")
+                accepted.append(claim)
+            except ValueError as error:
+                failures.append({"pair_id": proposal.pair_id, "claim": proposal.claim, "reason": str(error)})
+                rejected_pairs.add(proposal.pair_id)
+        if len(accepted) == 2:
+            if folder:
+                write_json(folder/"atomic_claims.json", [c.model_dump() for c in accepted])
+            return accepted
+        feedback = failures
+        if folder:
+            write_json(folder/"atomic_failure.json", {"accepted": [c.model_dump() for c in accepted],
+                                                     "failures": failures})
+    raise ValueError("Atomic claims failed exact evidence checks after three bounded attempts")
+
+
 def passages(sources):
     documents, lookup = [], {}
     for index, source in enumerate(sources):
@@ -107,13 +239,16 @@ def corroborated_candidates(sources):
     for source, text in lookup.values():
         if not source.primary or len(text) > 400 or text[-1] not in '.!\u201d"':
             continue
-        if text.startswith(("-", "•")) or re.search(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", text):
+        if text.startswith(("-", "•")) or re.search(r"\b\d{1,3}(?:(?:\.|\[\.\])\d{1,3}){3}\b", text):
+            continue
+        if re.match(r"(?:It|They|This|These|Those)\b", text) or re.search(
+                r"GUID order|alphabetical targeting|new secrets|MSP management application|security tool's application|IP in .*telemetry", text, re.I):
             continue
         matches = []
         for other, quote in lookup.values():
             if other.publisher == source.publisher or other.primary:
                 continue
-            coverage = len(words(text) & words(quote))/max(1, len(words(text)))
+            coverage = len(evidence_words(text) & evidence_words(quote))/max(1, len(evidence_words(text)))
             if coverage < .65:
                 continue
             candidate = Claim(claim=text, attribution=source.publisher, evidence=[
@@ -129,9 +264,12 @@ def corroborated_candidates(sources):
 
 
 def select_claims(llm, sources, folder=None, topic=None):
-    candidates = corroborated_candidates(sources)
+    # Prefer the newest first-party update over older quoted incident details.
+    latest = max((s for s in sources if s.primary), key=lambda s: s.updated_at or s.published_at)
+    current_sources = [latest, *[s for s in sources if not s.primary]]
+    candidates = corroborated_candidates(current_sources)
     if len(candidates) < 2:
-        raise ValueError("Need two primary-source statements with independent corroboration")
+        return atomic_claims(llm, current_sources, topic, folder)
     lookup = {f"c{i}": claim for i, claim in enumerate(candidates)}
     schema = create_model("GroundedClaimSelections", claim_ids=(
         list[Literal[tuple(lookup)]], Field(min_length=2, max_length=2)))
@@ -173,9 +311,9 @@ def verify_claims(claims, sources):
             quote = " ".join(evidence.quote.lower().split())
             if quote not in " ".join(source.text.lower().split()):
                 raise ValueError("Evidence quotation absent from retrieved document")
-            cw = words(claim.claim)
-            if len(cw & words(quote)) / max(1, len(cw)) < .65:
-                raise ValueError("Claim exceeds quoted evidence")
+            cw = evidence_words(claim.claim)
+            if len(cw & evidence_words(quote)) / max(1, len(cw)) < .65:
+                raise ValueError("Claim exceeds quoted evidence from " + source.publisher)
             for number in re.findall(r"\b\d+(?:[.,]\d+)*\b", claim.claim):
                 if number not in quote:
                     raise ValueError("Numeric claim lacks independent support")
@@ -204,12 +342,6 @@ def research(cfg, web, llm, topic, candidates, folder=None):
             if similarity(topic.title, source.title + " " + source.text) < threshold:
                 continue
             sources.append(source)
-            try:
-                independent_sources(sources)
-            except ValueError:
-                pass
-            else:
-                break
             parser = Links()
             parser.feed(html)
             # Follow cited official announcements, never arbitrary links across the web.
@@ -219,11 +351,11 @@ def research(cfg, web, llm, topic, candidates, folder=None):
             continue
     accepted = independent_sources(sources)
     sources, families = [], set()
-    for source in sorted(accepted, key=lambda s: not s.primary):
+    for source in sorted(accepted, key=lambda s: (s.primary, s.updated_at or s.published_at), reverse=True):
         if source.publisher not in families:
             sources.append(source)
             families.add(source.publisher)
-        if len(sources) == 3:
+        if len(sources) == 6:
             break
     if folder:
         write_json(folder/"source_documents.json", [s.model_dump(mode="json") for s in sources])
@@ -233,12 +365,17 @@ def research(cfg, web, llm, topic, candidates, folder=None):
         "Independently audit these claims against retrieved documents. Reject contradictions, stale "
         "information, missing context, misleading comparison, unsupported certainty or numerical claims. "
         "Audit the supplied claims, not unrelated assertions elsewhere in the documents. For rolling "
+        "Each claim must be individually established by BOTH its primary quotation and at least one "
+        "independent quotation. Related subject matter is not corroboration. Use context only to resolve "
+        "references; preserve uncertainty, negation and event dates. If supported, return reasons=[]. "
         "vendor advisories, updated_at with date_basis=dated_advisory_heading identifies the current "
         "dated update; published_at may be the older index-page creation date. "
         "supported must be false if any material claim is not entailed by its quotations.",
         {"claims": [c.model_dump() for c in claims], "sources": [
-            {**s.model_dump(exclude={"text"}), "current_context": s.text[:2000] if s.primary else s.text[:500]}
+            {**s.model_dump(exclude={"text"}), "current_context": s.text[:700] if s.primary else s.text[:300]}
             for s in sources]})
+    if folder:
+        write_json(folder/"source_audit.json", audit.model_dump())
     if not audit.supported:
         raise ValueError("Source evidence audit failed")
     return Research(sources=sources, claims=claims)

@@ -75,6 +75,40 @@ def test_atomic_topic_reservation(cfg):
         db.reserve_topic(second, "Google AI", "hash")
 
 
+def test_failed_and_preview_topics_do_not_exhaust_live_discovery(cfg):
+    db = Store(cfg.database_path)
+    failed = db.create()
+    db.reserve_topic(failed, "Google AI", "hash")
+    db.update(failed, "FAILED")
+    assert "Google AI" not in db.recent_topics(14)
+    replacement = db.create()
+    db.reserve_topic(replacement, "Google AI", "hash")
+    assert "Google AI" in db.recent_topics(14)
+    preview = db.create(dry_run=True)
+    db.reserve_topic(preview, "Preview only topic", "preview")
+    assert "Preview only topic" not in db.recent_topics(14)
+    db.update(replacement, "FAILED")
+    db.upload_progress(replacement, "INITIATING")
+    assert "Google AI" in db.recent_topics(14)
+    with pytest.raises(sqlite3.IntegrityError):
+        db.reserve_topic(preview, "Google AI", "hash")
+
+
+def test_private_tests_do_not_block_first_public_story(cfg):
+    db = Store(cfg.database_path)
+    private = db.create()
+    db.reserve_topic(private, "Google AI", "hash")
+    db.upload_progress(private, "CONFIRMED", video_id="private-test")
+    db.confirm_upload(private, "private-test", "private")
+    db.update(private, "AWAITING_REVIEW")
+    assert "Google AI" in db.recent_topics(14)
+    assert "Google AI" not in db.recent_topics(14, "public")
+    public = db.create()
+    db.reserve_topic(public, "Google AI", "hash", "public")
+    assert "Google AI" in db.recent_topics(14, "public")
+    assert db.get(private)["state"] == "AWAITING_REVIEW"
+
+
 def test_lock(cfg):
     cfg.prepare()
     with pipeline_lock(cfg):

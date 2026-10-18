@@ -128,23 +128,44 @@ class Store:
             row = db.execute("SELECT payload FROM artifacts WHERE job_id=? AND kind=?", (job_id, kind)).fetchone()
         return json.loads(row[0]) if row else None
 
-    def recent_topics(self, days):
+    def recent_topics(self, days, visibility=None):
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         with self.connect() as db:
-            return [r[0] for r in db.execute("SELECT title FROM topics WHERE created_at>?", (cutoff,))]
+            return [r[0] for r in db.execute(
+                "SELECT t.title FROM topics t JOIN video_jobs j ON j.id=t.job_id "
+                "WHERE t.created_at>? AND j.dry_run=0 AND (?!='public' OR j.state!='AWAITING_REVIEW') "
+                "AND (j.state NOT IN ('FAILED','SKIPPED') "
+                "OR EXISTS(SELECT 1 FROM upload_attempts u WHERE u.job_id=j.id))", (cutoff, visibility or "private"))]
 
-    def recent_scripts(self, days, excluding):
+    def recent_scripts(self, days, excluding, visibility=None):
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         with self.connect() as db:
             rows = db.execute("SELECT a.payload FROM artifacts a JOIN video_jobs j ON a.job_id=j.id "
-                              "WHERE a.kind='script' AND j.created_at>? AND j.id!=?", (cutoff, excluding))
+                              "WHERE a.kind='script' AND j.created_at>? AND j.id!=? AND j.dry_run=0 "
+                              "AND (?!='public' OR j.state!='AWAITING_REVIEW') "
+                              "AND (j.state NOT IN ('FAILED','SKIPPED') OR EXISTS(SELECT 1 FROM "
+                              "upload_attempts u WHERE u.job_id=j.id))", (cutoff, excluding, visibility or "private"))
             return [json.loads(row[0]) for row in rows]
 
-    def reserve_topic(self, job_id, title, fingerprint):
+    def reserve_topic(self, job_id, title, fingerprint, visibility=None):
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             existing = db.execute("SELECT fingerprint FROM topics WHERE job_id=?", (job_id,)).fetchone()
             if existing and existing[0] == fingerprint:
                 return
+            owner = db.execute("SELECT j.id,j.state,j.dry_run FROM topics t JOIN video_jobs j "
+                               "ON j.id=t.job_id WHERE t.fingerprint=?", (fingerprint,)).fetchone()
+            if owner:
+                attempted = db.execute("SELECT 1 FROM upload_attempts WHERE job_id=?", (owner["id"],)).fetchone()
+                private_test = visibility == "public" and owner["state"] == "AWAITING_REVIEW" and db.execute(
+                    "SELECT 1 FROM youtube_uploads WHERE job_id=? AND privacy='private'", (owner["id"],)).fetchone()
+                if not private_test and (attempted or (not owner["dry_run"] and owner["state"] not in ("FAILED", "SKIPPED"))):
+                    raise sqlite3.IntegrityError("Topic reserved by a live or uploaded job")
+                db.execute("DELETE FROM topics WHERE fingerprint=?", (fingerprint,))
+            if existing:
+                if db.execute("SELECT 1 FROM upload_attempts WHERE job_id=?", (job_id,)).fetchone():
+                    raise ValueError("Cannot change the topic of an attempted upload")
+                db.execute("DELETE FROM topics WHERE job_id=?", (job_id,))
             db.execute("INSERT INTO topics VALUES(?,?,?,?)", (fingerprint, title, now(), job_id))
 
     def attempt(self, job_id):

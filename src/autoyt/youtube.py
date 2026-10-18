@@ -1,17 +1,22 @@
 """Configured visibility, persistent resumable uploads and conservative outcome handling."""
 import json
+import logging
 import os
 import random
 import time
 
 from .store import now
 
+log = logging.getLogger(__name__)
+
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly"]
 
 
 def service(cfg, interactive=False):
+    import httplib2
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
+    from google_auth_httplib2 import AuthorizedHttp
     from google_auth_oauthlib.flow import InstalledAppFlow
     from googleapiclient.discovery import build
 
@@ -36,7 +41,8 @@ def service(cfg, interactive=False):
     temporary.write_text(credentials.to_json(), encoding="utf-8")
     os.chmod(temporary, 0o600)
     temporary.replace(token)
-    youtube = build("youtube", "v3", credentials=credentials, cache_discovery=False)
+    youtube = build("youtube", "v3", http=AuthorizedHttp(credentials, http=httplib2.Http(timeout=300)),
+                    cache_discovery=False)
     channels = youtube.channels().list(part="id,contentDetails", mine=True).execute().get("items", [])
     if len(channels) != 1:
         raise RuntimeError("CONFIGURATION: authorize exactly one YouTube channel")
@@ -186,6 +192,7 @@ def upload(cfg, store, job_id, folder):
         try:
             _, response = request.next_chunk(num_retries=0)
             store.upload_progress(job_id, "SESSION", request.resumable_uri, request.resumable_progress)
+            log.info("Job %s upload progress: %s bytes", job_id, request.resumable_progress)
             if response:
                 video_id = response["id"]
                 # Persist returned ID before any further network request.
@@ -199,7 +206,8 @@ def upload(cfg, store, job_id, folder):
             retryable = not isinstance(error, HttpError) or error.resp.status in (429, 500, 502, 503, 504)
             if not retryable or failures >= 3:
                 status = str(error.resp.status) if isinstance(error, HttpError) else type(error).__name__
-                raise RuntimeError("Upload paused (" + status + "); session saved. Retry this job, "
+                category = "TRANSIENT" if retryable else "CONFIGURATION"
+                raise RuntimeError(category + ": Upload paused (" + status + "); session saved. Retry this job, "
                                    "never create a replacement upload") from None
             request._in_error_state = True
             time.sleep(min(2 ** failures + random.random(), 15))

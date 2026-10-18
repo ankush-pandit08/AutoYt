@@ -4,7 +4,7 @@
 
 1. Install Python 3.11 or 3.12 and select **Add Python to PATH**. Use 64-bit Python.
 2. Install a trusted FFmpeg build with `ffmpeg.exe` and `ffprobe.exe`. Add its `bin` directory to PATH or set absolute `FFMPEG` and `FFPROBE` paths in `.env`. A downloaded build was placed in `data/tools` on the development machine; this ignored directory is not part of source distribution. Review the build's license if redistributing binaries.
-3. Install [Ollama for Windows](https://ollama.com/download/windows), start it, then run `ollama pull qwen3:4b-instruct`. The [4B instruct model](https://ollama.com/library/qwen3:4b-instruct) is configurable. Keep the server bound to localhost. Model weights require a one-time download; no paid inference service is used.
+3. Install [Ollama for Windows](https://ollama.com/download/windows), start it, then run `ollama pull qwen3:4b-instruct` and `ollama pull all-minilm:22m`. The small embedding model ranks evidence passages locally; it does not decide factual truth. The [4B instruct model](https://ollama.com/library/qwen3:4b-instruct) is configurable. Keep the server bound to localhost. Model weights require a one-time download; no paid inference service is used.
 4. Run `powershell -ExecutionPolicy Bypass -File scripts/install.ps1` in the project directory. It creates `.venv`, installs the package, copies `.env.example` if needed and runs diagnostics. It does not install system packages or register an OS scheduler.
 5. Set up an offline voice as below. Run `scripts/run.ps1 doctor --tts-test` and then `scripts/run.ps1 generate --dry-run`.
 
@@ -104,3 +104,26 @@ The base installer does not register a service/task. The optional startup script
 ## Storage and maintenance
 
 Run `cleanup` periodically to remove old scene MP4/PNG and per-scene voice intermediates. It preserves narration, final videos, covers, research, subtitle files, metadata, SQLite and upload sessions for review and recovery. Cached stock and final-video retention is manual. Stop AutoYT before backing up/moving the database, including its WAL companions, or use SQLite's backup tooling. A malformed `.env` fails startup. Run commands from the project root, and do not share your `.env`, token files or upload-session database.
+
+
+### Optional Groq API and Hinglish scripts
+
+Create an API key at https://console.groq.com/keys using your own account. Stay on the free plan if you want no API charges; quotas and model access depend on your account. Save these settings in the local `.env` file (never commit the real key):
+
+```dotenv
+LLM_PROVIDER=groq
+GROQ_API_KEY=your_key_here
+GROQ_MODEL=qwen/qwen3.8-27b
+NARRATION_LANGUAGE=hi
+SCRIPT_STYLE=hinglish
+TTS_VOICE=hm_omega
+```
+
+The configured Qwen model is currently a preview model; replace `GROQ_MODEL` if the provider retires it. Groq receives public news evidence and generated scripts for generation and audits. Local OAuth credentials and media API keys are not included. API mode uses lightweight lexical passage ranking instead of local embeddings, retains exact quotation and factual checks, and does not load Ollama. Kokoro and FFmpeg still run locally. Quota errors stop the run safely with bounded retries; there is no automatic paid-provider fallback. Free quotas may not cover ten videos every day.
+
+Hinglish uses Hindi sentence structure with common English tech words. Hindi is written in Devanagari for the Hindi Kokoro voice. Restart the dashboard after `.env` changes. While initially connecting the API, keep auto mode paused; run a complete test before resuming it.
+
+
+### Gemini API alternative
+
+Save `LLM_PROVIDER=gemini`, `GEMINI_API_KEY=your_key`, and `GEMINI_MODEL=gemini-3.8-flash` in `.env`. Gemini uses Google's structured JSON endpoint with local schema validation and the same factual/publication checks. Hosted mode does not load Ollama. Google lists a free tier for this model; account quotas still apply, and an account with paid billing can incur charges. Keep your project on the free tier for free-only operation. Public news evidence and scripts are sent to Google, whose free-tier terms allow use of content to improve products. OAuth and media keys are not sent. API keys stay in `.env`, excluded from Git. After changing settings, restart the dashboard. Keep automatic uploads paused until the connection and full video test succeed.
