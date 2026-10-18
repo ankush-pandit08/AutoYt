@@ -86,8 +86,6 @@ def card(cfg, headline, topic, path, index=0, stock=False):
         draw.line((x, 230*scale, x, y, min(w-70*scale, x+100*scale), y),
                   fill=(26, 68, 86), width=max(1, int(3*scale)))
         draw.ellipse((x-6*scale, y-6*scale, x+6*scale, y+6*scale), fill=(40, 211, 195))
-    draw.rounded_rectangle((70*scale, 120*scale, 390*scale, 184*scale), radius=20*scale, fill=(30, 211, 188))
-    draw.text((96*scale, 131*scale), "AutoYT / TECH", font=font(int(33*scale), True), fill=(9, 18, 34))
     if re.search(r"[\u0900-\u097f]", headline + topic):
         draw.rectangle((80*scale, 810*scale, 300*scale, 818*scale), fill=(38, 223, 201))
         draw.text((80*scale, 1710*scale), "ILLUSTRATIVE STOCK" if stock else "ORIGINAL EXPLAINER GRAPHICS",
