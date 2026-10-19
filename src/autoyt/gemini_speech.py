@@ -4,9 +4,11 @@ import hashlib
 import io
 import json
 import logging
+import re
 import time
 
 import httpx
+import numpy as np
 import soundfile as sf
 
 log = logging.getLogger(__name__)
@@ -31,21 +33,49 @@ def segment(cfg, text, path):
         check_audio(cache)
         path.write_bytes(cache.read_bytes())
         return
+    legacy = cfg.gemini_tts_model.startswith("gemini-2.5-")
+    url = "https://generativelanguage.googleapis.com/v1beta/interactions"
     body = {"model": cfg.gemini_tts_model,
             "input": [{"type": "user_input", "content": [{"type": "text", "text": text,
                        "annotations": [{"type": "speech_metadata", "style": STYLE}]}]}],
             "response_format": {"type": "audio"},
             "generation_config": {"speech_config": [{"voice": cfg.tts_voice}]}}
+    if legacy:
+        url = "https://generativelanguage.googleapis.com/v1beta/models/" + cfg.gemini_tts_model + ":generateContent"
+        body = {"contents": [{"parts": [{"text": STYLE +
+            " Read only the following transcript verbatim; do not speak these delivery instructions.\n\n" + text}]}],
+            "generationConfig": {"responseModalities": ["AUDIO"], "speechConfig": {
+                "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": cfg.tts_voice}}}}}
     for attempt in range(3):
         try:
             log.info("Generating Gemini narration (%s), attempt %s", cfg.tts_voice, attempt + 1)
-            response = httpx.post("https://generativelanguage.googleapis.com/v1beta/interactions",
+            response = httpx.post(url,
                                   headers={"x-goog-api-key": cfg.gemini_api_key}, json=body, timeout=180)
             response.raise_for_status()
-            blocks = [part for step in response.json().get("steps", []) if step.get("type") == "model_output"
-                      for part in step.get("content", []) if part.get("type") == "audio"]
-            raw = base64.b64decode(blocks[-1]["data"], validate=True)
-            samples, rate = sf.read(io.BytesIO(raw))
+            if legacy:
+                candidate = response.json()["candidates"][0]
+                if candidate.get("finishReason") != "STOP":
+                    raise ValueError("Incomplete speech response")
+                blocks = [part["inlineData"] for part in candidate["content"]["parts"] if "inlineData" in part]
+                mime = blocks[0]["mimeType"].lower()
+                if any(block["mimeType"].lower() != mime for block in blocks):
+                    raise ValueError("Mixed speech audio formats")
+                raw = b"".join(base64.b64decode(block["data"], validate=True) for block in blocks)
+                if mime.startswith("audio/l16"):
+                    match = re.search(r"(?:^|;)\s*rate=(\d+)", mime)
+                    rate = int(match.group(1)) if match else 24000
+                    if not 8000 <= rate <= 48000 or not raw or len(raw) % 2:
+                        raise ValueError("Invalid PCM speech")
+                    samples = np.frombuffer(raw, dtype="<i2")
+                elif mime.split(";", 1)[0] in {"audio/wav", "audio/x-wav"}:
+                    samples, rate = sf.read(io.BytesIO(raw))
+                else:
+                    raise ValueError("Unsupported speech audio format")
+            else:
+                blocks = [part for step in response.json().get("steps", []) if step.get("type") == "model_output"
+                          for part in step.get("content", []) if part.get("type") == "audio"]
+                raw = base64.b64decode(blocks[-1]["data"], validate=True)
+                samples, rate = sf.read(io.BytesIO(raw))
             temporary = cache.with_suffix(".tmp.wav")
             sf.write(temporary, samples, rate)
             stats = check_audio(temporary)

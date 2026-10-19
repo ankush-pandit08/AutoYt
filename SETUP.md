@@ -142,6 +142,8 @@ Keep the machine awake with AutoYT running at 05:00. If morning preparation is m
 
 ### Default Gemini narration
 
+For Gemini 2.5 Flash speech, set `GEMINI_TTS_MODEL=gemini-2.5-flash-preview-tts`, `TTS_ENGINE=gemini` and `TTS_VOICE=Puck`. The app uses Google's Generate Content endpoint and converts the returned raw PCM audio into WAV for validation and editing. This is a speech model; `gemini-2.5-flash` is the text model. The key remains only in the local `.env` file. This integration also retains support for the newer speech endpoint described below.
+
 Set `TTS_ENGINE=gemini`, `TTS_VOICE=Puck` and `GEMINI_TTS_MODEL=gemini-3.8-flash-tts` to use the approved Indian male Hinglish delivery for new videos. The existing `GEMINI_API_KEY` is reused. English tech names and Hindi text are sent verbatim to Gemini; voice style is separate metadata, so delivery instructions are not spoken. Each scene is measured separately for subtitle timing. The selected model controls pacing; the local `TTS_SPEED` setting applies to local engines.
 
 Validated scene audio is cached by exact text, voice, model and delivery style. Interrupted jobs can reuse completed scenes without repeating those API requests. Quota or access failures stop safely and retain the checkpoint. There is no silent change to another voice or paid model. Speech has its own provider quotas; ten video slots do not guarantee enough free speech requests. `doctor --tts-test` makes a small real speech request and checks its audio. Restart the dashboard after changing the engine or voice.

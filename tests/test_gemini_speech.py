@@ -64,3 +64,54 @@ def test_short_speech_rate_limit_waits_then_recovers(cfg, monkeypatch):
     Speech(cfg).segment("यह AI update है।", cfg.cache_dir.parent / "voice.wav")
     assert len(calls) == 2
     assert waits == [3]
+
+
+def test_flash_25_uses_generate_content_and_preserves_pcm_chunks(cfg, monkeypatch):
+    cfg.tts_engine, cfg.tts_voice, cfg.gemini_api_key = "gemini", "Puck", "test-secret"
+    cfg.gemini_tts_model = "gemini-2.5-flash-preview-tts"
+    pcm = (6000 * np.sin(np.arange(24000) * .1)).astype("<i2")
+    calls = []
+
+    def post(url, **kwargs):
+        assert url.endswith("/models/gemini-2.5-flash-preview-tts:generateContent")
+        assert kwargs["headers"]["x-goog-api-key"] == "test-secret"
+        body = kwargs["json"]
+        assert body["generationConfig"]["speechConfig"]["voiceConfig"] == {
+            "prebuiltVoiceConfig": {"voiceName": "Puck"}}
+        assert body["generationConfig"]["responseModalities"] == ["AUDIO"]
+        assert body["contents"][0]["parts"][0]["text"].endswith("यह AI update है।")
+        calls.append(body)
+        return httpx.Response(200, request=httpx.Request("POST", url), json={"candidates": [{
+            "finishReason": "STOP", "content": {"parts": [{"inlineData": {
+                "mimeType": "audio/L16;codec=pcm;rate=24000",
+                "data": base64.b64encode(chunk.tobytes()).decode()}} for chunk in np.array_split(pcm, 2)]}}]})
+
+    monkeypatch.setattr(httpx, "post", post)
+    path = cfg.cache_dir.parent / "flash25.wav"
+    Speech(cfg).segment("यह AI update है।", path)
+    actual, rate = sf.read(path, dtype="int16")
+    assert rate == 24000
+    np.testing.assert_array_equal(actual, pcm)
+    Speech(cfg).segment("यह AI update है।", path)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("reason,mime,data", [
+    ("MAX_TOKENS", "audio/L16;rate=24000", b"\x00\x00"),
+    ("STOP", "audio/L16;rate=24000", b"\x00"),
+    ("STOP", "audio/mpeg", b"invalid"),
+])
+def test_flash_25_rejects_incomplete_or_invalid_audio(cfg, monkeypatch, reason, mime, data):
+    cfg.tts_engine, cfg.tts_voice, cfg.gemini_api_key = "gemini", "Puck", "test-secret"
+    cfg.gemini_tts_model = "gemini-2.5-flash-preview-tts"
+
+    def post(url, **kwargs):
+        return httpx.Response(200, request=httpx.Request("POST", url), json={"candidates": [{
+            "finishReason": reason, "content": {"parts": [{"inlineData": {
+                "mimeType": mime, "data": base64.b64encode(data).decode()}}]}}]})
+
+    monkeypatch.setattr(httpx, "post", post)
+    path = cfg.cache_dir.parent / "invalid.wav"
+    with pytest.raises(ValueError, match="audio validation"):
+        Speech(cfg).segment("यह AI update है।", path)
+    assert not path.exists()
