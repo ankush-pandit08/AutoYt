@@ -12,7 +12,8 @@ from autoyt.scheduling import configure
 
 
 def test_ten_slots_and_transactional_limit(cfg):
-    settings = Settings(_env_file=None)
+    settings = Settings(_env_file=None, schedule_times="06:00,07:40,09:20,11:00,12:40,14:20,16:00,17:40,19:20,21:00",
+                        max_videos_per_day=10)
     assert len(settings.schedule_times.split(",")) == settings.max_videos_per_day == 10
     scheduler = configure(BackgroundScheduler(), settings)
     assert len(scheduler.get_jobs()) == 10

@@ -64,3 +64,27 @@ def test_pipeline_research_uses_seven_day_window(cfg, monkeypatch, age_days, exp
     job = pipeline.create_run()
     assert pipeline.store.get(job)["state"] == "FAILED"
     assert len(checked) == expected_checks
+
+
+def test_retry_refreshes_and_ranks_ai_ahead_of_saved_phone_pool(cfg, monkeypatch):
+    cfg.topic_focus = "ai_coding"
+    old = [Topic(title=f"Samsung phone update version {i}", url=f"https://example.com/phone/{i}",
+                 source="test", score=1, published_at=datetime.now(timezone.utc)) for i in range(45)]
+    fresh = Topic(title="Claude introduces agentic coding tools", url="https://example.com/claude",
+                  source="test", published_at=datetime.now(timezone.utc), score=.1)
+    pipeline = Pipeline(cfg)
+    job_id = pipeline.store.create()
+    pipeline.store.save(job_id, "candidates", [t.model_dump(mode="json") for t in old])
+    pipeline.store.save(job_id, "topic", old[0].model_dump(mode="json"))
+    pipeline.store.update(job_id, "FAILED", stage=1, topic=old[0].title)
+    monkeypatch.setattr("autoyt.pipeline.discovery.discover", lambda *args: [fresh])
+    checked = []
+
+    def reject(cfg, web, llm, topic, candidates, folder):
+        checked.append(topic.title)
+        raise ValueError("Evidence incomplete")
+
+    monkeypatch.setattr("autoyt.pipeline.research.research", reject)
+    pipeline.retry(job_id)
+    assert checked[0] == fresh.title
+    assert len(checked) == cfg.research_candidate_limit

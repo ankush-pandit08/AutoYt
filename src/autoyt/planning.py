@@ -36,6 +36,9 @@ def prepare_day(cfg, moment=None):
             candidates = discovery.discover(cfg, web)
             previous = store.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
             previous += store.recent_research_rejections()
+            if cfg.prefer_tech_insights or cfg.topic_focus == "ai_coding":
+                candidates = discovery.rank_insights(candidates, store.recent_topics(
+                    cfg.topic_dedup_days, cfg.youtube_privacy), cfg.topic_focus)
             selected = []
             for topic in candidates:
                 if discovery.duplicate(topic.title, previous + [t.title for t in selected]):
@@ -43,11 +46,14 @@ def prepare_day(cfg, moment=None):
                 selected.append(topic)
             plan = {"date": path.stem, "state": "PREPARING", "prepared_at": datetime.now(
                 ZoneInfo(cfg.timezone)).isoformat(), "entries": [], "rejected": [],
-                "candidates": [t.model_dump(mode="json") for t in selected[:30]], "cursor": 0,
+                "candidates": [t.model_dump(mode="json") for t in (
+                    [t for t in selected if t.content_kind == "news"][:cfg.research_candidate_limit]
+                    + [t for t in selected if t.content_kind == "evergreen"])], "cursor": 0,
                 "slots": cfg.schedule_times.split(",")[:cfg.max_videos_per_day]}
             write_json(path, plan)
         from .models import Topic
         candidates = [Topic.model_validate(t) for t in plan["candidates"]]
+        prior_evidence = store.recent_research(cfg.topic_dedup_days, visibility=cfg.youtube_privacy)
         try:
             while plan["cursor"] < len(candidates) and len(plan["entries"]) < len(plan["slots"]):
                 topic = candidates[plan["cursor"]]
@@ -55,6 +61,9 @@ def prepare_day(cfg, moment=None):
                 folder.mkdir(parents=True, exist_ok=True)
                 try:
                     evidence = research.research(cfg, web, llm, topic, candidates, folder)
+                    if discovery.repeated_insight([c.claim for c in evidence.claims],
+                                                 prior_evidence + [e["research"] for e in plan["entries"]]):
+                        raise ValueError("Verified insight already covered by another video")
                     script = ai.generate(cfg, llm, topic, evidence)
                     prior = [e["script"]["title"] for e in plan["entries"]]
                     prior += [s["title"] for s in store.recent_scripts(cfg.topic_dedup_days, "", cfg.youtube_privacy)]

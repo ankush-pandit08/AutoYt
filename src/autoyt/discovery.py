@@ -2,6 +2,7 @@ import hashlib
 import logging
 import math
 import re
+import unicodedata
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from urllib.parse import urlsplit
@@ -20,12 +21,28 @@ TECH = {"ai", "artificial", "intelligence", "software", "processor", "chip", "ch
         "apps", "app", "gadgets", "gadget", "smartwatch", "wearables", "headphones",
         "foldable", "pixel", "snapdragon", "qualcomm", "amd", "intel", "mediatek",
         "whatsapp", "instagram", "youtube", "oneplus", "smartphones", "processors"}
+AI_CODING = {"ai", "llm", "llms", "artificial", "openai", "chatgpt", "gemini", "claude",
+             "anthropic", "deepmind", "deepseek", "qwen", "llama", "mistral", "hugging",
+             "huggingface", "coding", "code", "programming", "developer", "developers",
+             "github", "copilot", "cursor", "codex", "ollama", "inference", "agents",
+             "agentic", "multimodal", "grok", "xai"}
+TECH |= AI_CODING
 STOP = {"a", "an", "the", "is", "of", "to", "and", "in", "on", "for", "with", "that", "it",
         "this", "new", "has", "are", "from", "its", "as", "by", "be", "at", "can", "you"}
 
 
 def words(text):
-    return set(re.findall(r"[a-z0-9]+", text.lower())) - STOP
+    # Keep combining marks with their letters, including Hindi vowel signs.
+    tokens, token = set(), []
+    for character in unicodedata.normalize("NFKC", text).casefold():
+        if unicodedata.category(character)[0] in "LMN":
+            token.append(character)
+        elif token:
+            tokens.add("".join(token))
+            token = []
+    if token:
+        tokens.add("".join(token))
+    return tokens - STOP
 
 
 def normalized(text):
@@ -42,9 +59,57 @@ def similarity(a, b):
 
 
 def duplicate(title, previous):
-    return any(similarity(title, old) >= 0.8 or
-               SequenceMatcher(None, normalized(title), normalized(old)).ratio() > 0.86
-               for old in previous)
+    title_tokens = normalized(title)
+    return bool(title_tokens) and any(
+        similarity(title, old) >= 0.8 or
+        SequenceMatcher(None, title_tokens, normalized(old)).ratio() > 0.86
+        for old in previous)
+
+
+def repeated_insight(claims, previous):
+    """A new headline does not make the same collection of verified facts new."""
+    return bool(claims) and any(
+        all(duplicate(claim, [c["claim"] for c in old.get("claims", [])]) for claim in claims)
+        for old in previous)
+
+
+def rank_insights(topics, recent_titles=(), focus="technology", slot=None):
+    """Favor recent useful developments and variety without discarding evidence candidates."""
+    categories = {
+        "ai": {"ai", "artificial", "model", "models", "gemini", "chatgpt", "openai"},
+        "development": {"coding", "developer", "developers", "programming", "github", "code"},
+        "security": {"security", "privacy", "cybersecurity", "breach", "malware"},
+        "hardware": {"chip", "chips", "processor", "processors", "gpu", "quantum"},
+        "gadgets": {"phone", "phones", "smartphone", "pixel", "iphone", "gadgets", "laptop"},
+        "software": {"app", "apps", "software", "windows", "browser", "linux"},
+    }
+    def category(text):
+        tokens = words(text)
+        return {name for name, terms in categories.items() if tokens & terms}
+
+    recent = [category(title) for title in recent_titles]
+    now = datetime.now(timezone.utc)
+
+    def score(topic):
+        if topic.content_kind == "evergreen":
+            return -1  # Verified explainers are fallback after recent news.
+        age = max(0, (now-topic.published_at).total_seconds())
+        freshness = max(0, 1-age/MAX_STORY_AGE_SECONDS)
+        tags = category(topic.title)
+        repetition = sum(bool(tags & old) for old in recent)/max(1, len(recent))
+        useful = bool(words(topic.title) & {
+            "tool", "tools", "research", "benchmark", "explained", "developer", "developers",
+            "coding", "privacy", "breakthrough", "launches", "releases", "introduces"})
+        opinion = bool(re.search(r"\b(?:reasons why|i['’]ll|i think|rumou?r|leaked|best deals)\b",
+                                 topic.title, re.I))
+        preference = 1 if focus == "ai_coding" and words(topic.title) & AI_CODING else 0
+        preferred_tags = {"08:00": {"ai", "development"}, "14:00": {"gadgets", "software"},
+                          "20:00": {"ai", "development", "security", "hardware"}}.get((slot or "")[-5:], set())
+        slot_bonus = 1.1 if tags & preferred_tags else 0
+        recent_bonus = .15 if age <= 72*3600 else 0
+        return preference + slot_bonus + recent_bonus + .6*topic.score + .2*freshness + .1*useful + .1*(1-repetition) - .35*opinion
+
+    return sorted(topics, key=score, reverse=True)
 
 
 def parse_feed(xml, source, now=None):
@@ -67,7 +132,8 @@ def parse_feed(xml, source, now=None):
     result = []
     for entry in feed.entries[:100]:
         parsed = entry.get("published_parsed") or entry.get("updated_parsed")
-        if not parsed or not entry.get("link") or not entry.get("title"):
+        link = entry.get("link") or entry.get("id", "")
+        if not parsed or urlsplit(link).scheme not in {"http", "https"} or not entry.get("title"):
             continue
         date = datetime(*parsed[:6], tzinfo=timezone.utc)
         age = (now - date).total_seconds() / 3600
@@ -79,7 +145,7 @@ def parse_feed(xml, source, now=None):
         volume = int(re.sub(r"[^0-9]", "", traffic)) if re.search(r"\d", traffic) else None
         related = [v for k, v in entry.items() if k.endswith("news_item_url") and isinstance(v, str)]
         related = trend_articles.get(entry.title, related)
-        topic = Topic(title=entry.title, url=related[0] if related else entry.link,
+        topic = Topic(title=entry.title, url=related[0] if related else link,
                       published_at=date, source=source,
                       volume=volume, related_urls=related)
         relevance = min(1, len(words(entry.title) & TECH) / 3)
@@ -132,4 +198,34 @@ def discover(cfg, web):
             result.extend(parse_feed(web.get(url), url))
         except Exception as error:
             log.warning("Feed unavailable: %s (%s)", url.split("?")[0], type(error).__name__)
-    return rank_topics(result)
+    ranked = rank_topics(result)
+    references, failed_channels = [], []
+    for channel_id in cfg.creator_channel_ids:
+        from urllib.parse import urlencode
+        url = "https://www.youtube.com/feeds/videos.xml?" + urlencode({"channel_id": channel_id})
+        try:
+            references.extend(parse_feed(web.get(url), url))
+        except Exception:
+            failed_channels.append(channel_id)
+    if failed_channels:
+        try:
+            from .youtube import creator_topics
+            references.extend(creator_topics(cfg, failed_channels))
+        except Exception as error:
+            log.warning("Creator topic signals unavailable (%s); using verified news feeds", type(error).__name__)
+    result = apply_creator_signals(ranked, references)
+    if cfg.enable_evergreen_fallback:
+        from .editorial import evergreen_topics
+        result.extend(evergreen_topics())
+    return result
+
+
+def apply_creator_signals(topics, references):
+    for topic in topics:
+        matching = [r for r in references if len(words(topic.title) & words(r.title)) >= 2
+                    and similarity(topic.title, r.title) >= .4]
+        topic.creator_references = [{"title": r.title, "url": r.url, "source": r.source}
+                                    for r in matching[:3]]
+        if matching:
+            topic.score = min(1, topic.score + .12)
+    return sorted(topics, key=lambda t: t.score, reverse=True)

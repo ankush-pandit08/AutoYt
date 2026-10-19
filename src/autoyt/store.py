@@ -105,9 +105,12 @@ class Store:
             raise ValueError("Unknown job ID")
         return dict(row)
 
-    def jobs(self):
+    def jobs(self, limit=100):
         with self.connect() as db:
-            return [dict(r) for r in db.execute("SELECT * FROM video_jobs ORDER BY created_at DESC LIMIT 100")]
+            query = "SELECT * FROM video_jobs ORDER BY created_at DESC"
+            if limit is None:
+                return [dict(r) for r in db.execute(query)]
+            return [dict(r) for r in db.execute(query + " LIMIT ?", (limit,))]
 
     def update(self, job_id, state, **fields):
         if set(fields) - {"stage", "topic", "error", "retries", "content_hash"}:
@@ -148,28 +151,38 @@ class Store:
                                       if isinstance(attempt, dict) and attempt.get("topic")))
 
     def recent_scripts(self, days, excluding, visibility=None):
+        return self.recent_artifacts("script", days, excluding, visibility)
+
+    def recent_research(self, days, excluding="", visibility=None):
+        return self.recent_artifacts("research", days, excluding, visibility)
+
+    def recent_artifacts(self, kind, days, excluding, visibility=None):
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         with self.connect() as db:
             rows = db.execute("SELECT a.payload FROM artifacts a JOIN video_jobs j ON a.job_id=j.id "
-                              "WHERE a.kind='script' AND j.created_at>? AND j.id!=? AND j.dry_run=0 "
+                              "WHERE a.kind=? AND j.created_at>? AND j.id!=? AND j.dry_run=0 "
                               "AND (?!='public' OR j.state!='AWAITING_REVIEW') "
                               "AND (j.state NOT IN ('FAILED','SKIPPED') OR EXISTS(SELECT 1 FROM "
-                              "upload_attempts u WHERE u.job_id=j.id))", (cutoff, excluding, visibility or "private"))
+                              "upload_attempts u WHERE u.job_id=j.id))", (kind, cutoff, excluding, visibility or "private"))
             return [json.loads(row[0]) for row in rows]
 
-    def reserve_topic(self, job_id, title, fingerprint, visibility=None):
+    def reserve_topic(self, job_id, title, fingerprint, visibility=None, days=14):
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             existing = db.execute("SELECT fingerprint FROM topics WHERE job_id=?", (job_id,)).fetchone()
             if existing and existing[0] == fingerprint:
                 return
-            owner = db.execute("SELECT j.id,j.state,j.dry_run FROM topics t JOIN video_jobs j "
+            owner = db.execute("SELECT j.id,j.state,j.dry_run,t.created_at FROM topics t JOIN video_jobs j "
                                "ON j.id=t.job_id WHERE t.fingerprint=?", (fingerprint,)).fetchone()
             if owner:
                 attempted = db.execute("SELECT 1 FROM upload_attempts WHERE job_id=?", (owner["id"],)).fetchone()
                 private_test = visibility == "public" and owner["state"] == "AWAITING_REVIEW" and db.execute(
                     "SELECT 1 FROM youtube_uploads WHERE job_id=? AND privacy='private'", (owner["id"],)).fetchone()
-                if not private_test and (attempted or (not owner["dry_run"] and owner["state"] not in ("FAILED", "SKIPPED"))):
+                # Only completed publications expire. Active or ambiguous uploads keep their reservation.
+                expired = owner["created_at"] <= cutoff and owner["state"] in ("PUBLISHED", "AWAITING_REVIEW")
+                if not (private_test or expired) and (
+                        attempted or (not owner["dry_run"] and owner["state"] not in ("FAILED", "SKIPPED"))):
                     raise sqlite3.IntegrityError("Topic reserved by a live or uploaded job")
                 db.execute("DELETE FROM topics WHERE fingerprint=?", (fingerprint,))
             if existing:

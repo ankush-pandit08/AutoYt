@@ -5,6 +5,41 @@ import pytest
 from autoyt import pipeline as module
 from autoyt.models import Topic
 from autoyt.pipeline import Pipeline
+from autoyt.store import write_json
+
+
+def test_retry_revalidates_visual_query_only_revision(cfg, script, monkeypatch):
+    runner = Pipeline(cfg)
+    job_id = runner.store.create()
+    runner.store.save(job_id, "script", script.model_dump(mode="json"))
+    runner.store.update(job_id, "FAILED", stage=3)
+    folder = cfg.output_dir / job_id
+    folder.mkdir(parents=True)
+    queries = [scene.visual_query for scene in script.scenes]
+    queries[0] = "network security hardware"
+    write_json(folder / "script_revision.json", {
+        "title": script.title, "description": script.description,
+        "thumbnail_text": script.thumbnail_text,
+        "narration": [s.narration for s in script.scenes],
+        "headlines": [s.headline for s in script.scenes], "visual_queries": queries})
+    checkpoints = []
+    monkeypatch.setattr(runner, "execute", lambda job: checkpoints.append(runner.store.get(job)["stage"]))
+    runner.retry(job_id)
+    assert checkpoints == [2]
+
+
+def test_interrupted_job_outside_recent_hundred_is_resumed(cfg, monkeypatch):
+    runner = Pipeline(cfg)
+    old = runner.store.create()
+    with runner.store.connect() as connection:
+        connection.execute("UPDATE video_jobs SET created_at='2020-01-01T00:00:00+00:00' WHERE id=?", (old,))
+    for _ in range(100):
+        job = runner.store.create()
+        runner.store.update(job, "SKIPPED")
+    resumed = []
+    monkeypatch.setattr(runner, "execute", lambda job: resumed.append(job) or job)
+    assert runner.create_run() == old
+    assert resumed == [old]
 
 
 def test_empty_discovery_skips_without_upload(cfg, monkeypatch):

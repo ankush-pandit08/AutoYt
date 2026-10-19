@@ -9,13 +9,16 @@ from .audio import check_audio, probe, run
 
 
 def font(size, bold=False):
-    candidates = [Path("data/fonts/NotoSansDevanagari.ttf"),
+    candidates = [Path("data/fonts/NotoSansDevanagari-Bold.ttf" if bold else "data/fonts/NotoSansDevanagari.ttf"),
                   Path("C:/Windows/Fonts/NirmalaB.ttf" if bold else "C:/Windows/Fonts/Nirmala.ttf"),
                   Path("/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf" if bold else
                        "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf"),
                   Path("C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf"),
                   Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else
                        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")]
+    # A regular variable font is not a bold face; prefer installed real bold fonts.
+    if bold:
+        candidates.append(Path("data/fonts/NotoSansDevanagari.ttf"))
     for path in candidates:
         if path.is_file():
             return ImageFont.truetype(str(path), size)
@@ -116,7 +119,7 @@ def srt_time(seconds):
 
 
 def subtitles(cfg, segments, folder):
-    size = int(cfg.video_width*.064*(1.7 if cfg.narration_language == "hi" else 1))
+    size = int(cfg.video_width*.068*(1.5 if cfg.narration_language == "hi" else 1))
     family = font(size, True).getname()[0]
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -126,7 +129,7 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{family},{size},&H00FFFFFF,&H0000FFFF,&H0020150D,&H80000000,-1,0,0,0,100,100,0,0,1,4,2,2,{int(cfg.video_width*.09)},{int(cfg.video_width*.17)},{int(cfg.video_height*.22)},1
+Style: Default,{family},{size},&H00FFFFFF,&H00FFFFFF,&H30000000,&H90000000,-1,0,0,0,100,100,0,0,3,{max(2, int(cfg.video_width*.01))},0,2,{int(cfg.video_width*.12)},{int(cfg.video_width*.12)},{int(cfg.video_height*.23)},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -138,7 +141,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         measure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
         face = font(size, True)
         for token in tokens:
-            if group and (len(group) >= 4 or measure.textlength(" ".join([*group, token]).upper(),
+            if group and (len(group) >= 3 or measure.textlength(" ".join([*group, token]).upper(),
                                                                font=face) > cfg.video_width*.70):
                 groups.append(group)
                 group = []
@@ -151,10 +154,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             end = cursor + (segment["end"]-segment["start"]) * weight/sum(weights)
             plain = " ".join(group).upper().replace("{", "").replace("}", "").replace("\\", "")
             # Phrase timing is estimated within measured TTS scenes; no false word-alignment claim.
-            highlighted = "{\\c&H00DFCF&}" + plain.split()[0] + "{\\c&HFFFFFF&}"
+            highlighted = "{\\c&HD2E838&}" + plain.split()[0] + "{\\c&HFFFFFF&}"
             text = highlighted + (" " + " ".join(plain.split()[1:]) if len(group) > 1 else "")
             events.append(f"Dialogue: 0,{ass_time(cursor)},{ass_time(end)},Default,,0,0,0,,"
-                          "{\\fad(70,70)\\fscx94\\fscy94\\t(0,100,\\fscx100\\fscy100)}" + text)
+                          "{\\fad(60,60)}" + text)
             srt.append(f"{len(srt)+1}\n{srt_time(cursor)} --> {srt_time(end)}\n{plain}\n")
             timings.append({"start": cursor, "end": end, "text": plain})
             cursor = end

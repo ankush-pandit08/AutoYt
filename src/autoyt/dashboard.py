@@ -142,6 +142,11 @@ class Dashboard:
                              "model": (cfg.gemini_model if cfg.llm_provider == "gemini" else
                                        cfg.groq_model if cfg.llm_provider == "groq" else cfg.ollama_model),
                              "pixabay": bool(cfg.pixabay_api_key),
+                             "public_images": cfg.enable_public_images,
+                             "creator_reference_count": len(cfg.creator_channel_ids),
+                             "prefer_tech_insights": cfg.prefer_tech_insights,
+                             "topic_focus": cfg.topic_focus,
+                             "script_style": cfg.script_style,
                              "pexels": bool(cfg.pexels_api_key), "token_present": cfg.youtube_token_file.is_file()},
                 "next_run": upcoming[0] if upcoming and self.scheduler.state == 1 else None,
                 "disk_free_gb": round(shutil.disk_usage(cfg.output_dir).free / 1024**3, 1),
@@ -157,7 +162,7 @@ class Dashboard:
         if not JOB_ID.fullmatch(job_id):
             raise ValueError("Invalid job")
         result = self.store.get(job_id)
-        for kind in ("script", "research", "research_attempts", "media_assets", "media_license_audit", "validation", "youtube"):
+        for kind in ("script", "research", "editorial", "content_package", "research_attempts", "media_assets", "media_license_audit", "validation", "youtube"):
             value = self.store.load(job_id, kind)
             if kind == "media_assets" and value:
                 value = [{k: v for k, v in asset.items() if k != "path"} for asset in value]

@@ -20,6 +20,12 @@ def check_asset(asset):
     for provider, (domain, license_url) in LICENSES.items():
         if source.hostname in (domain, "www." + domain) and license_url in asset.get("license", ""):
             return provider
+    if source.hostname == "commons.wikimedia.org" and asset.get("provider") == "Wikimedia Commons":
+        expected = {"CC0-1.0": "https://creativecommons.org/publicdomain/zero/1.0/",
+                    "Public domain": "https://creativecommons.org/publicdomain/mark/1.0/"}.get(asset.get("license"))
+        if expected and asset.get("license_url") == expected and asset.get("free_to_use") is True and asset.get("permitted_use"):
+            return "Wikimedia Commons"
+        raise ValueError("Public image rights are not approved")
     if (asset.get("free_to_use") is True and asset.get("license") in ("CC0-1.0", "CC-BY-4.0")
             and asset.get("permitted_use") and asset.get("license_url") == {
                 "CC0-1.0": "https://creativecommons.org/publicdomain/zero/1.0/",

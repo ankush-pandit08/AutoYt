@@ -30,8 +30,8 @@ def evidence_words(text):
 def publisher(url):
     host = urlsplit(url).hostname or ""
     # Conservative publisher families; subdomains and owned publications are not independent.
-    for family, domains in {"google": ["google.com", "blog.google", "googleblog.com"],
-                            "microsoft": ["microsoft.com"],
+    for family, domains in {"google": ["google.com", "blog.google", "googleblog.com", "deepmind.google"],
+                            "microsoft": ["microsoft.com", "github.com", "github.blog"],
                             "vox": ["theverge.com", "vox.com"],
                             "conde-nast": ["arstechnica.com", "wired.com"]}.items():
         if any(host == d or host.endswith("."+d) for d in domains):
@@ -54,14 +54,36 @@ class Links(HTMLParser):
             self.links.extend(v for k, v in attrs if k == "href" and v)
 
 
-def extract(url, html, cfg, date_hint=None):
+def official_links(html, base_url, title, cfg):
+    """Prioritize cited announcement paths over site navigation and syndication feeds."""
+    parser = Links()
+    parser.feed(html)
+    links = []
+    for link in parser.links:
+        url = urljoin(base_url, link).split("#")[0]
+        parts = urlsplit(url)
+        path = parts.path.strip("/")
+        if parts.scheme != "https" or not primary(url, cfg) or not path:
+            continue
+        tokens = words(path.replace("-", " ").replace("_", " "))
+        if tokens & {"rss", "feed", "xml", "login", "signin", "privacy", "terms"}:
+            continue
+        if len(path.split("/")) == 1 and path in {"news", "blog", "security", "research", "about"}:
+            continue
+        links.append(url)
+    return sorted(dict.fromkeys(links),
+                  key=lambda url: similarity(title, urlsplit(url).path.replace("-", " ")),
+                  reverse=True)
+
+
+def extract(url, html, cfg, date_hint=None, *, evergreen=False):
     doc = trafilatura.bare_extraction(html, url=url, with_metadata=True)
     if not doc or not doc.text or len(doc.text) < 250:
         raise ValueError("Insufficient article text")
-    if not doc.date and not date_hint:
+    if not doc.date and not date_hint and not evergreen:
         raise ValueError("Undated source rejected")
     date = datetime.fromisoformat(doc.date.replace("Z", "+00:00")) if doc.date else date_hint
-    if date.tzinfo is None:
+    if date is not None and date.tzinfo is None:
         date = date.replace(tzinfo=timezone.utc)
     current = datetime.now(timezone.utc)
     updated = None
@@ -72,12 +94,15 @@ def extract(url, html, cfg, date_hint=None):
         if match:
             updated = datetime.strptime(match.group(1), "%B %d, %Y").replace(tzinfo=timezone.utc)
     effective_date = updated or date
-    if date > current or not 0 <= (current-effective_date).total_seconds() <= MAX_STORY_AGE_SECONDS:
+    if date is not None and date > current:
         raise ValueError("Stale or future source date")
-    if date_hint and abs((date - date_hint).total_seconds()) > 86400 * 2:
+    if not evergreen and not 0 <= (current-effective_date).total_seconds() <= MAX_STORY_AGE_SECONDS:
+        raise ValueError("Stale or future source date")
+    if date_hint and date and abs((date - date_hint).total_seconds()) > 86400 * 2:
         raise ValueError("Conflicting publication dates")
     return Source(url=url, title=doc.title or url, text=doc.text[:14000], published_at=date,
-                  updated_at=updated, date_basis="dated_advisory_heading" if updated else "publication_metadata",
+                  updated_at=updated, date_basis=("dated_advisory_heading" if updated else
+                      "publication_metadata" if date else "current_document_no_publication_date"),
                   retrieved_at=current, primary=primary(url, cfg), publisher=publisher(url))
 
 
@@ -133,7 +158,7 @@ def atomic_claims(llm, sources, topic, folder=None):
         if not source.primary or position >= 25 or not usable(text):
             continue
         for independent_id, (other, quote) in lookup.items():
-            if other.primary or source.publisher == other.publisher or not usable(quote):
+            if source.publisher == other.publisher or not usable(quote):
                 continue
             overlap = evidence_words(text) & evidence_words(quote)
             if len({w for w in overlap if not w.isdigit()}) >= 2:
@@ -246,7 +271,7 @@ def corroborated_candidates(sources):
             continue
         matches = []
         for other, quote in lookup.values():
-            if other.publisher == source.publisher or other.primary:
+            if other.publisher == source.publisher:
                 continue
             coverage = len(evidence_words(text) & evidence_words(quote))/max(1, len(evidence_words(text)))
             if coverage < .65:
@@ -263,10 +288,11 @@ def corroborated_candidates(sources):
     return candidates[:16]
 
 
-def select_claims(llm, sources, folder=None, topic=None):
+def select_claims(llm, sources, folder=None, topic=None, *, include_primary=False):
     # Prefer the newest first-party update over older quoted incident details.
-    latest = max((s for s in sources if s.primary), key=lambda s: s.updated_at or s.published_at)
-    current_sources = [latest, *[s for s in sources if not s.primary]]
+    latest = max((s for s in sources if s.primary), key=lambda s: s.updated_at or s.published_at or s.retrieved_at)
+    current_sources = [latest, *[s for s in sources if s.publisher != latest.publisher
+                                and (include_primary or not s.primary)]]
     candidates = corroborated_candidates(current_sources)
     if len(candidates) < 2:
         return atomic_claims(llm, current_sources, topic, folder)
@@ -325,13 +351,16 @@ def verify_claims(claims, sources):
 
 def publication_hint(topic):
     # A Trends timestamp dates search interest, not publication of its linked news article.
-    return None if urlsplit(getattr(topic, "source", "")).hostname == "trends.google.com" else topic.published_at
+    return None if getattr(topic, "content_kind", "news") == "evergreen" or urlsplit(
+        getattr(topic, "source", "")).hostname == "trends.google.com" else topic.published_at
 
 
 def research(cfg, web, llm, topic, candidates, folder=None):
+    evergreen = getattr(topic, "content_kind", "news") == "evergreen"
     urls = [(topic.url, publication_hint(topic)), *[(u, None) for u in topic.related_urls if u != topic.url]]
-    urls.extend((t.url, publication_hint(t)) for t in candidates
-                if t.url != topic.url and similarity(topic.title, t.title) >= .35)
+    if not evergreen:
+        urls.extend((t.url, publication_hint(t)) for t in candidates
+                    if t.content_kind == "news" and t.url != topic.url and similarity(topic.title, t.title) >= .35)
     sources, seen = [], set()
     retrievals = []
     index = 0
@@ -343,18 +372,17 @@ def research(cfg, web, llm, topic, candidates, folder=None):
         seen.add(url)
         try:
             html = web.article(url)
-            source = extract(url, html, cfg, hint)
+            source = extract(url, html, cfg, hint, evergreen=True) if evergreen else extract(url, html, cfg, hint)
             threshold = .25 if source.primary else .4
             if similarity(topic.title, source.title + " " + source.text) < threshold:
                 retrievals.append({"url": url, "result": "Article is not sufficiently related to this story"})
                 continue
             sources.append(source)
             retrievals.append({"url": url, "result": "Accepted official source" if source.primary else "Accepted independent source"})
-            parser = Links()
-            parser.feed(html)
             # Follow cited official announcements, never arbitrary links across the web.
-            urls.extend((urljoin(url, link), None) for link in parser.links
-                        if primary(urljoin(url, link), cfg) and urljoin(url, link) not in seen)
+            if not evergreen:
+                urls.extend((link, None) for link in official_links(html, url, topic.title, cfg)
+                            if link not in seen and not any(link == pending for pending, _ in urls))
         except Exception as error:
             # Persist only controlled diagnostics; HTTP exception strings may contain credentials.
             import httpx
@@ -379,7 +407,7 @@ def research(cfg, web, llm, topic, candidates, folder=None):
         raise ValueError(f"Evidence incomplete: {primary_count} official and {independent_count} independent "
                          "sources accepted; need two independent publishers including a recent official source") from None
     sources, families = [], set()
-    for source in sorted(accepted, key=lambda s: (s.primary, s.updated_at or s.published_at), reverse=True):
+    for source in sorted(accepted, key=lambda s: (s.primary, s.updated_at or s.published_at or s.retrieved_at), reverse=True):
         if source.publisher not in families:
             sources.append(source)
             families.add(source.publisher)
@@ -387,7 +415,7 @@ def research(cfg, web, llm, topic, candidates, folder=None):
             break
     if folder:
         write_json(folder/"source_documents.json", [s.model_dump(mode="json") for s in sources])
-    claims = select_claims(llm, sources, folder, topic.title)
+    claims = select_claims(llm, sources, folder, topic.title, include_primary=True) if evergreen else select_claims(llm, sources, folder, topic.title)
     from .ai import Audit
     audit = llm.structured(Audit,
         "Independently audit these claims against retrieved documents. Reject contradictions, stale "

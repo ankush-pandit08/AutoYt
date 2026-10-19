@@ -10,7 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
     timezone: str = "Asia/Kolkata"
-    schedule_times: str = "06:00,07:40,09:20,11:00,12:40,14:20,16:00,17:40,19:20,21:00"
+    schedule_times: str = "08:00,14:00,20:00"
     daily_script_batch: bool = False
     morning_plan_time: str = Field(default="05:00", pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
     ollama_base_url: str = "http://127.0.0.1:11434"
@@ -57,8 +57,15 @@ class Settings(BaseSettings):
     duration_max: float = 60
     encoder_preset: str = "fast"
     crf: int = Field(default=20, ge=15, le=28)
-    max_videos_per_day: int = Field(default=10, ge=1, le=10)
+    max_videos_per_day: int = Field(default=3, ge=1, le=10)
     topic_dedup_days: int = Field(default=14, ge=1)
+    prefer_tech_insights: bool = False
+    topic_focus: Literal["technology", "ai_coding"] = "technology"
+    research_candidate_limit: int = Field(default=40, ge=12, le=100)
+    enable_evergreen_fallback: bool = False
+    editorial_references: list[str] = []
+    creator_channel_ids: list[str] = []
+    enable_public_images: bool = False
     min_free_gb: float = Field(default=2, ge=0)
     retention_days: int = Field(default=14, ge=1)
     output_dir: Path = Path("output/jobs")
@@ -66,6 +73,9 @@ class Settings(BaseSettings):
     database_path: Path = Path("data/database/autoyt.db")
     google_trends_region: str = "IN"
     rss_feeds: list[str] = ["https://blog.google/rss/", "https://blogs.microsoft.com/feed/",
+                            "https://deepmind.google/blog/rss.xml", "https://huggingface.co/blog/feed.xml",
+                            "https://github.blog/ai-and-ml/feed/", "https://devblogs.microsoft.com/ai/feed/",
+                            "https://techcrunch.com/category/artificial-intelligence/feed/",
                             "https://www.theverge.com/rss/index.xml", "https://techcrunch.com/feed/",
                             "https://feeds.arstechnica.com/arstechnica/index",
                             "https://openai.com/news/rss.xml", "https://www.bleepingcomputer.com/feed/",
@@ -77,7 +87,11 @@ class Settings(BaseSettings):
                                   "android-developers.googleblog.com", "blog.chromium.org",
                                   "connectwise.com", "drupal.org", "npmjs.com", "safedep.io",
                                   "github.com", "socket.dev", "huntress.com", "replit.com",
-                                  "cloudflare.com", "about.fb.com"]
+                                  "cloudflare.com", "about.fb.com", "anthropic.com", "deepmind.google",
+                                  "huggingface.co", "github.blog", "mistral.ai", "cursor.com",
+                                  "ai.meta.com", "ollama.com", "ibm.com", "aws.amazon.com",
+                                  "developers.google.com", "fidoalliance.org", "webauthn.guide",
+                                  "git-scm.com", "atlassian.com"]
     local_media_manifest: Path = Path("assets/footage/manifest.json")
 
     @model_validator(mode="after")

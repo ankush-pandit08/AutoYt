@@ -12,6 +12,41 @@ log = logging.getLogger(__name__)
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly"]
 
 
+def creator_topics(cfg, channel_ids):
+    """Read bounded public upload metadata; creator videos are leads, never claim evidence."""
+    from datetime import datetime, timezone
+
+    from googleapiclient.errors import HttpError
+
+    from .discovery import MAX_STORY_AGE_SECONDS, TECH, words
+    from .models import Topic
+
+    youtube, _ = service(cfg)
+    channels = youtube.channels().list(part="contentDetails", id=",".join(channel_ids)).execute()
+    result = []
+    for channel in channels.get("items", []):
+        playlist = channel["contentDetails"]["relatedPlaylists"]["uploads"]
+        try:
+            uploads = youtube.playlistItems().list(part="snippet,contentDetails", playlistId=playlist,
+                                                   maxResults=10).execute()
+        except HttpError as error:
+            if error.resp.status in (403, 404):
+                log.info("A creator upload playlist is unavailable; continuing other references")
+                continue
+            raise
+        for item in uploads.get("items", []):
+            snippet, detail = item["snippet"], item["contentDetails"]
+            published = detail.get("videoPublishedAt")
+            if not published or not words(snippet["title"]) & TECH:
+                continue
+            date = datetime.fromisoformat(published.replace("Z", "+00:00"))
+            if not 0 <= (datetime.now(timezone.utc)-date).total_seconds() <= MAX_STORY_AGE_SECONDS:
+                continue
+            result.append(Topic(title=snippet["title"], url="https://www.youtube.com/watch?v="+detail["videoId"],
+                                published_at=date, source="https://www.youtube.com/channel/"+channel["id"]))
+    return result
+
+
 def service(cfg, interactive=False):
     from google.auth.exceptions import RefreshError, TransportError
     from google.auth.transport.requests import Request

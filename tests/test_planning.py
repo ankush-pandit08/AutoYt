@@ -16,7 +16,12 @@ def test_morning_snapshot_is_ranked_unique_and_generated_only_once(cfg, script, 
                         "Browser privacy controls arrive today"])]
     calls = []
     monkeypatch.setattr(planning.discovery, "discover", lambda *args: calls.append("discover") or topics)
-    monkeypatch.setattr(planning.research, "research", lambda *args: research_data)
+    def research(*args):
+        result = research_data.model_copy(deep=True)
+        for claim in result.claims:
+            claim.claim = args[3].title + "."
+        return result
+    monkeypatch.setattr(planning.research, "research", research)
     def generate(cfg, llm, topic, research):
         calls.append("write")
         return script.model_copy(update={"title": topic.title, "topic": topic.title})

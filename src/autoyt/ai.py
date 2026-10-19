@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 
 import httpx
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, Field, ValidationError, create_model
 
 from .discovery import words
 from .models import Scene, Script
@@ -174,6 +174,12 @@ class LLM:
                 response.raise_for_status()
                 content = response.json()["choices"][0]["message"]["content"]
                 return schema.model_validate_json(content)
+            except ValidationError as error:
+                constraints = [{"field": list(item["loc"]), "problem": item["type"],
+                                "bounds": {key: value for key, value in item.get("ctx", {}).items()
+                                           if isinstance(value, (int, float))}}
+                               for item in error.errors(include_input=False)[:12]]
+                failure = " Previous JSON failed these schema constraints; repair them: " + json.dumps(constraints)
             except (ValueError, KeyError, IndexError, TypeError):
                 # Do not echo a provider response into logs/errors: it may contain sensitive data.
                 failure = " Previous response failed schema validation; follow every required field and constraint."
@@ -234,10 +240,15 @@ def writer_script(draft, topic, research):
                     visual_query=draft.visual_queries[i] if isinstance(draft, EditorialDraft) else
                     "cloud computing technology servers",
                     claim_ids=list(range(len(research.claims)))) for i, line in enumerate(draft.narration)]
+    from .editorial import category
+    topic_tag = {"Artificial Intelligence & LLMs": "#AI", "Smartphones & Gadgets": "#Gadgets",
+                 "Cybersecurity & Digital Awareness": "#Cybersecurity",
+                 "Future Technology & Innovation": "#Innovation",
+                 "Useful Apps, Websites & Tech Tips": "#TechTips"}.get(category(topic.title), "#TechNews")
     return assemble_script(ScriptDraft(
         topic=topic.title, title=draft.title, description=draft.description,
-        thumbnail_text=draft.thumbnail_text, hashtags=["#Technology", "#Shorts"],
-        visual_keywords=["cloud computing", "technology", "servers"], scenes=scenes,
+        thumbnail_text=draft.thumbnail_text, hashtags=[topic_tag, "#Technology", "#Shorts"],
+        visual_keywords=list(dict.fromkeys(scene.visual_query for scene in scenes)), scenes=scenes,
         source_urls=[s.url for s in research.sources], needs_synthetic_media_disclosure=False))
 
 
@@ -291,6 +302,7 @@ def validate_grounding(script, research):
 
 
 def generate(cfg, llm, topic, research, duration_feedback=None, reviewed_draft=None):
+    draft_schema = EditorialDraft if cfg.llm_provider != "ollama" else WriterDraft
     if cfg.narration_language == "hi" and cfg.script_style == "hinglish":
         language_instruction = (
             "Write a natural conversational Hinglish tech news explainer for an Indian audience. "
@@ -308,12 +320,19 @@ def generate(cfg, llm, topic, research, duration_feedback=None, reviewed_draft=N
         language_instruction = "Write an original English news explainer for a general audience. "
     for _ in range(2):
         draft = reviewed_draft or llm.structured(
-            EditorialDraft if cfg.llm_provider != "ollama" else WriterDraft,
+            draft_schema,
             language_instruction +
-            "Narration: exactly SIX strings, each a complete spoken passage of about 15 words. "
+            "Create a useful original tech insight: explain what changed, why it matters, and one "
+            "practical implication supported by the evidence. Favor AI tools, software, developer "
+            "workflows, gadgets, chips and privacy over generic headline recaps. "
+            "Reference creator names are the viewer's editorial preferences only. Use broad qualities "
+            "such as clear explanations, concrete examples and curiosity-led storytelling. "
+            "Do not copy scripts, signature phrases or a creator's distinctive delivery, claim their "
+            "endorsement, or treat their names or opinions as factual evidence. "
+            "Narration: exactly SIX strings, each a complete spoken passage of about 16–19 words. "
             "When writing Hindi or Hinglish, EVERY narration string must include Hindi in Devanagari, "
             "including advice and the closing question; retain familiar English tech terms. "
-            "Write 85–100 words TOTAL across the six passages. End every passage with sentence punctuation. "
+            "Write 100–110 words TOTAL across the six passages. End every passage with sentence punctuation. "
             "Use only the supplied facts, attributed in THIRD PERSON to their publisher. "
             "Use only digits listed in allowed_numerals, including inside product names or version labels. "
             "The topic label may contain numerals that are not established by the verified claims; omit them. "
@@ -326,6 +345,9 @@ def generate(cfg, llm, topic, research, duration_feedback=None, reviewed_draft=N
             "4. Deliver the second verified fact as the payoff to the hook. "
             "5. Give one practical takeaway clearly labelled as general advice. "
             "6. End with a concise relevant question inviting a thoughtful comment; do not promise a part two. "
+            "Target timing: hook 0–3s, main development 3–12s, explanation 12–35s, takeaway 35–45s. "
+            "For evergreen content, explain a useful concept without saying it just launched, is breaking "
+            "news or is a new update. Undated documentation has a retrieval date, not a publication date. "
             "Use short spoken sentences, varied rhythm and direct familiar language. "
             "Titles should create honest curiosity and name the subject. No generic filler, fake urgency, "
             "invented statistics, exaggerated certainty, guaranteed outcomes or clickbait promises. "
@@ -342,8 +364,13 @@ def generate(cfg, llm, topic, research, duration_feedback=None, reviewed_draft=N
             "If it requests visual_queries, write six relevant English stock-footage searches with varied "
             "concrete imagery, avoiding brand names and claims that stock depicts the actual event.",
             {"topic_context": topic.title,
+             "content_kind": topic.content_kind,
+             "reference_creators": cfg.editorial_references,
+             "creator_topic_signals": topic.creator_references,
+             "reference_rule": "Creator video titles suggest angles only; no transcripts were retrieved. "
+                               "Use only verified_claims for facts and never imply a video was watched.",
              "current_date_utc": datetime.now(timezone.utc).date().isoformat(),
-             "source_publication_dates": [s.published_at.isoformat() for s in research.sources],
+             "source_publication_dates": [s.published_at.isoformat() if s.published_at else None for s in research.sources],
              "context_rule": "Topic title identifies the subject; only verified_claims establish factual assertions.",
              "verified_claims": [{"text": c.claim, "attribution": c.attribution} for c in research.claims],
              "allowed_numerals": sorted(set(re.findall(r"\b\d+(?:[.,]\d+)*\b", " ".join(

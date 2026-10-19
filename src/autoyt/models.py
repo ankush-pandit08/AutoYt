@@ -7,17 +7,25 @@ from pydantic import BaseModel, Field, model_validator
 class Topic(BaseModel):
     title: str
     url: str
-    published_at: datetime
+    published_at: datetime | None
     source: str
+    content_kind: Literal["news", "evergreen"] = "news"
     volume: int | None = None
     related_urls: list[str] = []
+    creator_references: list[dict[str, str]] = []
     score: float = 0
+
+    @model_validator(mode="after")
+    def dated_news(self):
+        if self.content_kind == "news" and self.published_at is None:
+            raise ValueError("News topics require a publication date")
+        return self
 
 
 class Source(BaseModel):
     url: str
     title: str
-    published_at: datetime
+    published_at: datetime | None
     updated_at: datetime | None = None
     date_basis: str = "publication_metadata"
     retrieved_at: datetime

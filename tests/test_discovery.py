@@ -63,3 +63,39 @@ def test_real_search_interest_boosts_matching_news_only():
     ranked = rank_topics([unrelated, pixel, trend])
     assert ranked.index(pixel) < ranked.index(unrelated)
     assert unrelated.volume is None
+
+
+@pytest.mark.parametrize("title", ["Claude launches agentic coding", "DeepSeek releases LLM inference update",
+                                  "Cursor introduces developer tools", "Qwen releases multimodal models"])
+def test_ai_developer_headlines_are_discovered(title):
+    xml = f"""<rss><channel><item><title>{title}</title><link>https://example.com/news</link>
+    <pubDate>{format_datetime(datetime.now(timezone.utc))}</pubDate></item></channel></rss>"""
+    assert len(parse_feed(xml, "test")) == 1
+
+
+def test_feed_permalink_guid_without_link():
+    xml = f"""<rss><channel><item><title>LLM coding update</title>
+    <guid isPermaLink="true">https://huggingface.co/blog/llm-update</guid>
+    <pubDate>{format_datetime(datetime.now(timezone.utc))}</pubDate></item></channel></rss>"""
+    assert parse_feed(xml, "test")[0].url == "https://huggingface.co/blog/llm-update"
+
+
+def test_ai_focus_prioritizes_ai_but_keeps_general_tech_fallback():
+    from autoyt.discovery import rank_insights
+    gadget = topic("Samsung phone update", "https://example.com/phone")
+    ai = topic("Claude agentic coding update", "https://example.com/claude")
+    ai.score = .1
+    gadget.score = 1
+    assert rank_insights([gadget, ai], focus="ai_coding") == [ai, gadget]
+
+
+def test_official_links_prioritize_story_over_navigation(cfg):
+    from autoyt.research import official_links, publisher
+    html = '''<a href="https://blog.google/security/rss/">RSS</a>
+    <a href="https://blog.google/">Home</a><a href="https://blog.google/about/">About</a>
+    <a href="https://blog.google/pixel/new-phone/">Phone</a>
+    <a href="https://blog.google/ai/gemini-coding-update/">Announcement</a>'''
+    links = official_links(html, "https://example.com/story", "Gemini coding update", cfg)
+    assert links == ["https://blog.google/ai/gemini-coding-update/", "https://blog.google/pixel/new-phone/"]
+    assert publisher("https://deepmind.google/blog/update") == publisher("https://blog.google/ai/update")
+    assert publisher("https://github.blog/update") == publisher("https://microsoft.com/update")

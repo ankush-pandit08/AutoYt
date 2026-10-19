@@ -39,7 +39,7 @@ class Pipeline:
                 research.verify_claims(evidence.claims, research.independent_sources(evidence.sources))
                 ai.validate_grounding(script, evidence)
             # Interrupted active work takes priority over creating another job.
-            active = [j for j in self.store.jobs() if j["state"] in STAGES + ["CREATED", "UPLOADING"]]
+            active = [j for j in self.store.jobs(limit=None) if j["state"] in STAGES + ["CREATED", "UPLOADING"]]
             if active:
                 if bool(active[-1]["dry_run"]) != dry_run:
                     raise ValueError("An interrupted job has a different dry-run mode; retry its ID first")
@@ -50,13 +50,16 @@ class Pipeline:
                 if prepared:
                     folder = self.cfg.output_dir / job_id
                     folder.mkdir(parents=True, exist_ok=True)
-                    self._save(job_id, folder, "morning_plan", {"date": slot[:10] if slot else None})
+                    if slot:
+                        self._save(job_id, folder, "morning_plan", {"date": slot[:10]})
                     if discovery.duplicate(selected.title, self.store.recent_topics(
-                            self.cfg.topic_dedup_days, self.cfg.youtube_privacy)):
+                            self.cfg.topic_dedup_days, self.cfg.youtube_privacy)) or discovery.repeated_insight(
+                                [c.claim for c in evidence.claims], self.store.recent_research(
+                                    self.cfg.topic_dedup_days, job_id, self.cfg.youtube_privacy)):
                         self.store.update(job_id, "SKIPPED", error="Morning story already covered")
                         return job_id
                     self.store.reserve_topic(job_id, selected.title, discovery.fingerprint(selected.title),
-                                             self.cfg.youtube_privacy)
+                                             self.cfg.youtube_privacy, self.cfg.topic_dedup_days)
                     for name, value in (("topic", selected), ("research", evidence), ("script", script)):
                         self._save(job_id, folder, name, value)
                     self.store.update(job_id, "SCRIPTING", stage=3, topic=selected.title)
@@ -74,6 +77,7 @@ class Pipeline:
                 changed |= any(getattr(revision, k) != previous[k] for k in ("title", "description", "thumbnail_text"))
                 if isinstance(revision, ai.EditorialDraft):
                     changed |= revision.headlines != [s["headline"] for s in previous["scenes"]]
+                    changed |= revision.visual_queries != [s["visual_query"] for s in previous["scenes"]]
                 if changed:
                     # A changed editorial revision must pass scripting checks again before new audio.
                     self.store.update(job_id, job["state"], stage=2)
@@ -115,6 +119,9 @@ class Pipeline:
                         previous = db.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
                         previous += db.recent_research_rejections()
                         candidates = [t for t in candidates if not discovery.duplicate(t.title, previous)]
+                        if cfg.prefer_tech_insights or cfg.topic_focus == "ai_coding":
+                            candidates = discovery.rank_insights(candidates, db.recent_topics(
+                                cfg.topic_dedup_days, cfg.youtube_privacy), cfg.topic_focus, job.get("slot"))
                         if job["topic"]:
                             candidates = [t for t in candidates if discovery.similarity(t.title, job["topic"]) >= .35]
                     if not candidates:
@@ -126,7 +133,8 @@ class Pipeline:
                         self._save(job_id, folder, "candidates", [t.model_dump(mode="json") for t in candidates])
                     self._save(job_id, folder, "topic", candidates[0])
                     # A topic is reserved before research; failed stories do not repeatedly consume slots.
-                    db.reserve_topic(job_id, candidates[0].title, discovery.fingerprint(candidates[0].title), cfg.youtube_privacy)
+                    db.reserve_topic(job_id, candidates[0].title, discovery.fingerprint(candidates[0].title),
+                                     cfg.youtube_privacy, cfg.topic_dedup_days)
                     db.update(job_id, STAGES[index], topic=candidates[0].title)
                 elif index == 1:
                     candidates = [Topic.model_validate(t) for t in (db.load(job_id, "candidates") or [])
@@ -136,26 +144,32 @@ class Pipeline:
                         requested = (db.load(job_id, "request") or {}).get("topic_filter")
                         if requested:
                             fresh = [t for t in fresh if discovery.similarity(t.title, requested) >= .35]
-                        known = {t.url for t in candidates}
-                        candidates.extend(t for t in fresh if t.url not in known)
+                        # Refresh matching URLs as well as order; saved feed entries can be stale.
+                        candidates = list({t.url: t for t in [*candidates, *fresh]}.values())
                         self._save(job_id, folder, "candidates", [t.model_dump(mode="json") for t in candidates])
                     selected = Topic.model_validate(db.load(job_id, "topic"))
+                    selected = next((t for t in candidates if t.url == selected.url), selected)
                     choices = [selected, *[t for t in candidates if t.url != selected.url]]
                     previous = db.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
                     previous = [title for title in previous if title != selected.title]
+                    if cfg.prefer_tech_insights or cfg.topic_focus == "ai_coding":
+                        choices = discovery.rank_insights(choices, previous, cfg.topic_focus, job.get("slot"))
+                    # Ineligible entries must not consume the research budget.
+                    choices = [t for t in choices if not discovery.duplicate(t.title, previous)
+                               and (t.content_kind == "evergreen" or
+                                    0 <= (datetime.now(timezone.utc)-t.published_at).total_seconds()
+                                    <= discovery.MAX_STORY_AGE_SECONDS)]
+                    choices = ([t for t in choices if t.content_kind == "news"][:cfg.research_candidate_limit]
+                               + [t for t in choices if t.content_kind == "evergreen"])
+                    prior_evidence = db.recent_research(cfg.topic_dedup_days, job_id, cfg.youtube_privacy)
                     failures = []
-                    for candidate in choices[:12]:
-                        age = (datetime.now(timezone.utc)-candidate.published_at).total_seconds()
-                        if not 0 <= age <= discovery.MAX_STORY_AGE_SECONDS:
-                            failures.append({"topic": candidate.title, "reason": "Discovery story is no longer within seven days"})
-                            self._save(job_id, folder, "research_attempts", failures)
-                            continue
-                        if discovery.duplicate(candidate.title, previous):
-                            continue
+                    for candidate in choices:
                         self._save(job_id, folder, "topic", candidate)
                         db.update(job_id, STAGES[index], topic=candidate.title)
                         try:
                             result = research.research(cfg, self.web, self.llm, candidate, candidates, folder)
+                            if discovery.repeated_insight([c.claim for c in result.claims], prior_evidence):
+                                raise ValueError("Verified insight already covered; choosing a different story")
                         except ValueError as error:
                             retrieval_path = folder / "source_retrievals.json"
                             retrievals = json.loads(retrieval_path.read_text(encoding="utf-8")) if retrieval_path.is_file() else []
@@ -165,7 +179,8 @@ class Pipeline:
                             log.info("Research candidate rejected: %s", str(error)[:150])
                             continue
                         self._save(job_id, folder, "topic", candidate)
-                        db.reserve_topic(job_id, candidate.title, discovery.fingerprint(candidate.title), cfg.youtube_privacy)
+                        db.reserve_topic(job_id, candidate.title, discovery.fingerprint(candidate.title),
+                                         cfg.youtube_privacy, cfg.topic_dedup_days)
                         db.update(job_id, STAGES[index], topic=candidate.title)
                         break
                     else:
@@ -173,6 +188,8 @@ class Pipeline:
                                          + " checked topics. Open run details for source access and evidence failures; "
                                          "retry later when fresh official coverage is available.")
                     self._save(job_id, folder, "research", result)
+                    from .editorial import selection_details
+                    self._save(job_id, folder, "editorial", selection_details(candidate, result, job.get("slot")))
                 elif index == 2:
                     revision_path = folder / "script_revision.json"
                     revision = {}
@@ -232,6 +249,11 @@ class Pipeline:
                     result = video.quality(cfg, folder / "final.mp4", db.load(job_id, "caption_timing"),
                                            folder / "narration.wav")
                     self._save(job_id, folder, "validation", result)
+                    from .editorial import content_package
+                    self._save(job_id, folder, "content_package", content_package(
+                        Topic.model_validate(db.load(job_id, "topic")), evidence, script,
+                        db.load(job_id, "caption_timing"), db.load(job_id, "media_assets"), folder,
+                        job.get("slot")))
                     db.update(job_id, "VALIDATING", content_hash=digest(folder / "final.mp4"))
                 db.update(job_id, STAGES[index], stage=index+1)
             db.update(job_id, "READY_TO_UPLOAD")

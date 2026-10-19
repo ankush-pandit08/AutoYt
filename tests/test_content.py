@@ -128,7 +128,12 @@ def test_graphics_fallback(cfg, script):
 def test_caption_boundaries(cfg, tmp_path):
     result = subtitles(cfg, [{"text": "A processor executes software instructions clearly.", "start": 0, "end": 4}], tmp_path)
     assert abs(result[-1]["end"]-4) < .001
-    assert "\\t(" in (tmp_path/"subtitles.ass").read_text(encoding="utf-8-sig")
+    ass = (tmp_path/"subtitles.ass").read_text(encoding="utf-8-sig")
+    assert "\\fad(" in ass
+    assert all(len(phrase["text"].split()) <= 3 for phrase in result)
+    style = next(line for line in ass.splitlines() if line.startswith("Style: Default,")).split(",")
+    assert style[7] == "-1"  # Bold text.
+    assert style[15] == "3"  # Dark caption box for contrast over public photos.
     assert "00:00:04,000" in (tmp_path/"subtitles.srt").read_text()
 
 

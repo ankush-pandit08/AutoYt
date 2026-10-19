@@ -76,7 +76,7 @@ def cleanup(cfg):
     """Remove only reproducible intermediates of terminal jobs; preserve review/recovery artifacts."""
     cutoff = datetime.now(timezone.utc)-timedelta(days=cfg.retention_days)
     removed = 0
-    for job in Store(cfg.database_path).jobs():
+    for job in Store(cfg.database_path).jobs(limit=None):
         if job["state"] not in ("AWAITING_REVIEW", "PUBLISHED", "SKIPPED", "FAILED"):
             continue
         if datetime.fromisoformat(job["updated_at"]) >= cutoff:

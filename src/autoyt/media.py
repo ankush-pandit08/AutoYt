@@ -3,6 +3,7 @@ import json
 import logging
 
 from .audio import probe
+from .commons import acquire as public_image
 from .discovery import words
 from .licensing import audit, check_asset
 from .pixabay import acquire as pixabay_asset
@@ -18,6 +19,8 @@ def choose_media(cfg, web, script):
     result = []
     pixabay_queries, pixabay_used = [], set()
     pixabay_failed = False
+    public_queries, public_used = set(), set()
+    public_failed = False
     for scene in script.scenes:
         asset = {"kind": "graphics", "license": "Original AutoYT graphics", "query": scene.visual_query,
                  "attribution": "Original explanatory graphics", "path": None, "source_url": None}
@@ -68,6 +71,17 @@ def choose_media(cfg, web, script):
                     break
             except Exception as error:
                 log.warning("Pexels unavailable (%s); using original graphics", type(error).__name__)
+        if asset["path"] is None and cfg.enable_public_images and not public_failed:
+            query = scene.visual_query
+            if query in public_queries or len(public_queries) < 4:
+                public_queries.add(query)
+                try:
+                    selected = public_image(cfg, web, query, public_used)
+                    if selected:
+                        asset = selected
+                except Exception as error:
+                    public_failed = True
+                    log.warning("Public images unavailable (%s); continuing visual fallbacks", type(error).__name__)
         if asset["path"] is None and cfg.pixabay_api_key and not pixabay_failed:
             # At most two distinct search queries per run, cached for 24h; no mass downloading.
             query = scene.visual_query

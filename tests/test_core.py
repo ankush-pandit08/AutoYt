@@ -52,6 +52,68 @@ def test_dedupe():
     assert not duplicate("Windows software update", ["Apple processor announcement"])
 
 
+def test_hindi_dedupe_preserves_words_and_vowel_marks():
+    from autoyt.discovery import words
+
+    assert "सुरक्षा" in words("कंप्यूटर सुरक्षा कैसे बढ़ाएं")
+    assert not duplicate("नया स्मार्टफोन बाजार में आया", ["कंप्यूटर सुरक्षा कैसे बढ़ाएं"])
+    assert not duplicate("Google ने नया फोन जारी किया", ["Google की सुरक्षा सेवा बाधित हुई"])
+    assert duplicate("कंप्यूटर सुरक्षा कैसे बढ़ाएं", ["कंप्यूटर सुरक्षा कैसे बढ़ाएं"])
+    assert not duplicate("!!!", ["???"])
+
+
+@pytest.mark.parametrize("state", ["PUBLISHED", "AWAITING_REVIEW"])
+def test_completed_topic_reservations_expire_at_configured_window(cfg, state):
+    db = Store(cfg.database_path)
+    old, replacement = db.create(), db.create()
+    db.reserve_topic(old, "Google AI", "hash")
+    db.upload_progress(old, "CONFIRMED", video_id="old-video")
+    db.confirm_upload(old, "old-video")
+    db.update(old, state)
+    with db.connect() as connection:
+        connection.execute("UPDATE topics SET created_at=? WHERE job_id=?",
+                           ((datetime.now(timezone.utc)-timedelta(days=4)).isoformat(), old))
+    with pytest.raises(sqlite3.IntegrityError):
+        db.reserve_topic(replacement, "Google AI", "hash", days=7)
+    db.reserve_topic(replacement, "Google AI", "hash", days=3)
+    assert db.attempt(old)["video_id"] == "old-video"
+
+
+@pytest.mark.parametrize("state,attempted", [("CREATED", False), ("FAILED", True), ("UPLOADING", True)])
+def test_old_active_or_ambiguous_topic_reservations_do_not_expire(cfg, state, attempted):
+    db = Store(cfg.database_path)
+    old, replacement = db.create(), db.create()
+    db.reserve_topic(old, "Google AI", "hash")
+    if attempted:
+        db.upload_progress(old, "INTERRUPTED", session_uri="https://upload.example/session")
+    db.update(old, state)
+    with db.connect() as connection:
+        connection.execute("UPDATE topics SET created_at=? WHERE job_id=?",
+                           ((datetime.now(timezone.utc)-timedelta(days=30)).isoformat(), old))
+    with pytest.raises(sqlite3.IntegrityError):
+        db.reserve_topic(replacement, "Google AI", "hash")
+
+
+def test_cleanup_reaches_jobs_older_than_recent_hundred(cfg):
+    from autoyt.cli import cleanup
+
+    db = Store(cfg.database_path)
+    old = db.create()
+    db.update(old, "PUBLISHED")
+    stale = (datetime.now(timezone.utc)-timedelta(days=30)).isoformat()
+    with db.connect() as connection:
+        connection.execute("UPDATE video_jobs SET created_at=?,updated_at=? WHERE id=?", (stale, stale, old))
+    folder = cfg.output_dir / old
+    folder.mkdir(parents=True)
+    (folder / "clip-00.mp4").write_bytes(b"intermediate")
+    (folder / "final.mp4").write_bytes(b"preserved")
+    for _ in range(100):
+        db.create()
+    assert old not in {j["id"] for j in db.jobs()}
+    assert cleanup(cfg) == {"intermediate_files_removed": 1}
+    assert (folder / "final.mp4").read_bytes() == b"preserved"
+
+
 @pytest.mark.parametrize("override", [{"youtube_privacy": "unlisted"}, {"schedule_times": ""},
     {"schedule_times": "08:00,08:00,20:00"}, {"enable_upload": True}, {"video_width": 1920},
     {"ollama_base_url": "https://paid-api.example"}, {"duration_min": 50}])

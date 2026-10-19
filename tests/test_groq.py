@@ -23,6 +23,8 @@ def test_hosted_audit_validates_schema_and_never_loads_local_model(cfg, monkeypa
     model.release()
     assert len(calls) == 2
     assert "यह AI update" in calls[0]["messages"][1]["content"]
+    assert '"field": ["supported"]' in calls[1]["messages"][0]["content"]
+    assert '"problem": "missing"' in calls[1]["messages"][0]["content"]
 
 
 def test_missing_api_key_fails_before_network(cfg, monkeypatch):
