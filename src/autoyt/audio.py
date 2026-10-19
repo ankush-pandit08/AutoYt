@@ -59,6 +59,9 @@ class Speech:
             segment(self.cfg, text, path)
         elif self.cfg.tts_engine == "kokoro":
             lang = "hi" if self.cfg.narration_language == "hi" else "en-us"
+            if lang == "en-us" and re.search(r"[\u0900-\u097f]", text):
+                raise ValueError("English voice selected, but this saved script contains Hindi. "
+                                 "Create an English script or revise the saved narration before retrying")
             if lang == "hi" and not self.cfg.tts_voice.startswith("h"):
                 raise ValueError("Hindi narration requires a Hindi Kokoro voice such as hm_omega")
             try:

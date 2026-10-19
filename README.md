@@ -83,6 +83,8 @@ Pexels requires your own valid API key; account/key availability is provider-con
 
 Pixabay video and portrait-photo retrieval is implemented with `PIXABAY_API_KEY`. Searches are cached for 24 hours, query counts are bounded, and licensed media/credits are saved locally. Photo B-roll uses gentle pan/zoom. A bad key or provider failure falls back to original graphics without exposing the key in logs. Unsplash integration remains unimplemented. No stock keys are required for the original-graphics path.
 
+Pixabay stock selection prioritizes photos and supports up to six distinct Pixabay queries per run so each scene can search for its own narrated subject. Local assets and provider results are not reused within the same video. Matching requires specific query terms in the provider's tags; unrelated or exhausted results fall back to scene-specific original graphics rather than a previous scene's image. Metadata matching is a relevance filter, not visual recognition of every image. English narration defaults to the local Kokoro `am_michael` male voice.
+
 Kokoro's model is Apache-2.0 per its [model card](https://huggingface.co/hexgrad/Kokoro-82M). Qwen's [Ollama model page](https://ollama.com/library/qwen3:4b-instruct) links its model/license information. Check any replacement voice/model and included system fonts under their own licenses. AutoYT does not redistribute font binaries or model weights.
 
 ## Upload safety and limitations

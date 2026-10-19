@@ -7,6 +7,7 @@ let state, token, pending, refreshing = false;
 const time = value => value ? new Date(value).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',timeZone:state?.settings.timezone || 'Asia/Kolkata'}) : '—';
 const date = value => new Date(value).toLocaleDateString('en-IN',{day:'numeric',month:'short',timeZone:state?.settings.timezone || 'Asia/Kolkata'});
 const nice = value => String(value).replaceAll('_',' ').toLowerCase().replace(/^./, c => c.toUpperCase());
+const narrationName = () => state?.settings.language === 'en' ? 'English' : state?.settings.script_style === 'hinglish' ? 'Hinglish' : 'Hindi';
 function badge(value) {
   const kind = ['PUBLISHED','AWAITING_REVIEW'].includes(value) ? 'success' : value === 'FAILED' ? 'error' : value === 'SKIPPED' ? 'warning' : value === 'READY_TO_UPLOAD' ? 'neutral' : 'working';
   return `<span class="badge ${kind}">${esc(value === 'AWAITING_REVIEW' ? 'Private upload' : nice(value))}</span>`;
@@ -71,6 +72,7 @@ function render() {
   if(plan?.rejected?.length) $('planEntries').innerHTML += `<details><summary>${plan.rejected.length} stories did not pass checks</summary><ul>${plan.rejected.map(e=>`<li>${esc(e.topic)} — ${esc(e.reason)}</li>`).join('')}</ul></details>`;
   $('refreshed').textContent = `Updated ${time(s.now)}`;
   $('writingWarning').textContent = s.writing_warning;
+  updateCustomInput();
   renderJobs();
 }
 async function refresh() {
@@ -98,7 +100,7 @@ function confirmAction(name, job_id, manual_input) {
   $('confirmAction').textContent = preview ? 'Generate preview' : name === 'retry' ? 'Retry run' : 'Start run';
   if(manual_input) {
     $('confirmTitle').textContent = preview ? 'Preview your input?' : 'Create from your input?';
-    $('confirmText').textContent = `${manual_input.mode === 'script' ? 'Uses your exact narration, with fact checks and scene planning.' : 'Researches only your chosen topic and writes a Hinglish script.'} No unrelated topic will be substituted. ${preview ? 'This creates a preview without uploading.' : state.settings.uploads_enabled ? `If all checks pass, the video uploads ${state.settings.visibility === 'public' ? 'PUBLICLY' : 'privately'} to your pinned channel.` : 'Uploads are disabled.'}`;
+    $('confirmText').textContent = `${manual_input.mode === 'script' ? 'Uses your exact narration, with fact checks and scene planning.' : `Researches only your chosen topic and writes an engaging ${narrationName()} script.`} No unrelated topic will be substituted. ${preview ? 'This creates a preview without uploading.' : state.settings.uploads_enabled ? `If all checks pass, the video uploads ${state.settings.visibility === 'public' ? 'PUBLICLY' : 'privately'} to your pinned channel.` : 'Uploads are disabled.'}`;
   }
   $('confirm').showModal();
 }
@@ -127,7 +129,8 @@ function updateCustomInput() {
   content.maxLength = script ? 5000 : 180;
   content.rows = script ? 6 : 3;
   $('customLabel').textContent = script ? 'Paste your narration' : 'What should this video be about?';
-  $('customHelp').textContent = script ? '60–115 words, at least six complete sentences. Hindi words in Devanagari, English tech words as normal. Your words stay unchanged; unsupported facts stop the run.' : 'We research only this topic and write an engaging Hinglish script. If it cannot be verified, the run stops.';
+  const languageHelp = state?.settings.language === 'en' ? 'English narration only.' : 'Hindi words in Devanagari, English tech words as normal.';
+  $('customHelp').textContent = script ? `60–115 words, at least six complete sentences. ${languageHelp} Your words stay unchanged; unsupported facts stop the run.` : `We research only this topic and write an engaging ${narrationName()} script. If it cannot be verified, the run stops.`;
   $('customCount').textContent = script ? `${content.value.trim().split(/\s+/).filter(Boolean).length} / 60–115 words` : `${content.value.length} / 180 characters`;
 }
 function customRun(preview) {

@@ -320,7 +320,10 @@ def generate(cfg, llm, topic, research, duration_feedback=None, reviewed_draft=N
             "Write an original Hindi news explainer in Devanagari for an Indian audience. "
             "Use energetic but natural phrasing. Keep technical proper names recognizable. ")
     else:
-        language_instruction = "Write an original English news explainer for a general audience. "
+        language_instruction = (
+            "Write an original English-only news explainer for a general audience. Use plain, "
+            "conversational English, short sentences, and explain necessary jargon simply. "
+            "Do not mix in Hindi, Hinglish or another language. ")
     if provided_narration:
         language_instruction = (
             "The user supplied their own narration in provided_narration. Preserve every word and punctuation "
@@ -373,7 +376,10 @@ def generate(cfg, llm, topic, research, duration_feedback=None, reviewed_draft=N
             "Thumbnail text is 3–5 words. Do not put URLs or hashtags in any field. "
             "If the schema requests headlines, write six short factual scene headlines. "
             "If it requests visual_queries, write six relevant English stock-footage searches with varied "
-            "concrete imagery, avoiding brand names and claims that stock depicts the actual event.",
+            "concrete imagery, avoiding brand names and claims that stock depicts the actual event. "
+            "Match each search to the concrete subject or action in that scene's narration. Prefer distinct "
+            "specific photo subjects across scenes, not repeated generic technology backgrounds. "
+            "Do not introduce unrelated imagery merely to make scenes look different.",
             {"topic_context": topic.title,
              "provided_narration": provided_narration,
              "content_kind": topic.content_kind,
@@ -394,6 +400,8 @@ def generate(cfg, llm, topic, research, duration_feedback=None, reviewed_draft=N
                 raise ValueError("Your supplied narration was changed; verbatim script preservation is required")
             if cfg.narration_language == "hi" and not re.search(r"[\u0900-\u097f]", script.script):
                 raise ValueError("Hindi narration was requested; return Hindi text in Devanagari")
+            if cfg.narration_language == "en" and re.search(r"[\u0900-\u097f]", script.script):
+                raise ValueError("English-only narration was requested; Hindi/Hinglish text is not allowed")
             problems = []
             validate_grounding(script, research)
             audit = llm.structured(ScriptAudit,

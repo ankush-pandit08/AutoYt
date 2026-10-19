@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     indicf5_steps: int = Field(default=16, ge=8, le=64)
     indicf5_threads: int = Field(default=2, ge=1, le=12)
     indicf5_timeout_seconds: int = Field(default=3600, ge=60, le=7200)
-    tts_voice: str = "af_heart"
+    tts_voice: str = "am_michael"
     tts_speed: float = Field(default=1.0, ge=0.85, le=1.15)
     narration_language: Literal["en", "hi"] = "en"
     script_style: Literal["standard", "hinglish"] = "standard"

@@ -28,7 +28,7 @@ TTS_VOICE=hm_omega
 TTS_SPEED=1.05
 ```
 
-`hm_psi` is the other Hindi male voice. Run `.venv/Scripts/python scripts/preview_hindi_voice.py` to generate both local samples. `doctor --tts-test` also synthesizes a real sample in the selected language. English uses `NARRATION_LANGUAGE=en` with an English voice such as `af_heart`. Hindi writing prompts, video metadata and Devanagari subtitle/card rendering follow the selected language; a successful voice test does not validate automatic news writing.
+`hm_psi` is the other Hindi male voice. Run `.venv/Scripts/python scripts/preview_hindi_voice.py` to generate both local samples. `doctor --tts-test` also synthesizes a real sample in the selected language. English uses `NARRATION_LANGUAGE=en` with an male English voice such as `am_michael`. Hindi writing prompts, video metadata and Devanagari subtitle/card rendering follow the selected language; a successful voice test does not validate automatic news writing.
 
 ### Pixabay B-roll
 
@@ -38,7 +38,7 @@ Log in to [Pixabay's API documentation](https://pixabay.com/api/docs/) to see yo
 PIXABAY_API_KEY=your_actual_key
 ```
 
-Pixabay is optional. AutoYT tries local licensed assets and configured Pexels videos, then Pixabay video/photo search, then original graphics. Each run uses at most two different Pixabay queries and downloads at most one asset per scene. Search responses are cached for 24 hours as required by the provider; already-downloaded media is reused locally. Portrait photos can use pan/zoom; lower-resolution footage is skipped. Source URLs, license references and creator credits are recorded locally in each job; YouTube descriptions are left empty. Generic stock is labelled illustrative on screen. API failures fall back to original graphics without printing credentials.
+Pixabay is optional. AutoYT tries local licensed assets and configured Pexels videos, then Pixabay photo/video search, then original graphics. Each run uses at most six different Pixabay queries and downloads at most one asset per scene. Search responses are cached for 24 hours as required by the provider; already-downloaded media is reused locally. Portrait photos can use pan/zoom; lower-resolution footage is skipped. Source URLs, license references and creator credits are recorded locally in each job; YouTube descriptions are left empty. Generic stock is labelled illustrative on screen. API failures fall back to original graphics without printing credentials.
 
 ### Other offline voices
 
@@ -131,7 +131,7 @@ Save `LLM_PROVIDER=gemini`, `GEMINI_API_KEY=your_key`, and `GEMINI_MODEL=gemini-
 
 ### Morning-only script preparation
 
-Set `DAILY_SCRIPT_BATCH=true` and `MORNING_PLAN_TIME=05:00` to discover ranked technology stories and prepare up to ten distinct, verified Hinglish scripts once each morning. Preparation must start before the earliest video slot. At each `SCHEDULE_TIMES` slot, AutoYT uses its assigned saved script and research, then generates narration, sources licensed media, renders, validates and uploads. It does not rediscover topics or write replacement scripts at video time. Narration that exceeds the duration bounds stops safely rather than triggering new writing. Manual Run now and preview commands remain explicit on-demand workflows.
+Set `DAILY_SCRIPT_BATCH=true` and `MORNING_PLAN_TIME=05:00` to discover ranked technology stories and prepare up to ten distinct, verified scripts in the configured language once each morning. Preparation must start before the earliest video slot. At each `SCHEDULE_TIMES` slot, AutoYT uses its assigned saved script and research, then generates narration, sources licensed media, renders, validates and uploads. It does not rediscover topics or write replacement scripts at video time. Narration that exceeds the duration bounds stops safely rather than triggering new writing. Manual Run now and preview commands remain explicit on-demand workflows.
 
 The dashboard shows the morning plan and saved scripts. Plans are dated in the configured timezone and saved under `data/database/daily-plans`. Discovery snapshots and completed entries survive interruptions. If insufficient stories pass verification or API quotas are exhausted, the plan may contain fewer than ten scripts; missing slots are skipped. API failures do not trigger repeated daily discovery. An advanced manual `autoyt plan-day` command can initialize today's plan outside the normal schedule. A completed/failed daily plan is not regenerated automatically.
 

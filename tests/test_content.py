@@ -18,6 +18,12 @@ def test_valid_claims(research_data):
     verify_claims(research_data.claims, research_data.sources)
 
 
+def test_english_kokoro_will_not_read_an_old_hindi_script(cfg, tmp_path):
+    cfg.tts_engine, cfg.narration_language, cfg.tts_voice = "kokoro", "en", "am_michael"
+    with pytest.raises(ValueError, match="saved script contains Hindi"):
+        Speech(cfg).segment("यह पुरानी Hindi narration है।", tmp_path / "voice.wav")
+
+
 def test_fabricated_quote(research_data):
     research_data.claims[0].evidence[0].quote = "This is an invented sentence that never appeared in the retrieved source."
     with pytest.raises(ValueError, match="quotation"):

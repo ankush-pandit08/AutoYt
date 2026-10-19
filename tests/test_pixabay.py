@@ -77,3 +77,56 @@ def test_generic_query_terms_do_not_accept_unrelated_stock():
     assert not relevant(query, {"tags": "firenze, italy, black white, europe, travel, tourism, street, house, lock, security"})
     assert not relevant(query, {"tags": "heart, lock, padlock, fence, love"})
     assert relevant(query, {"tags": "cyber, security, digital, encryption"})
+
+
+def test_specific_queries_need_more_than_one_generic_tag():
+    assert not relevant("digital computer processor", {"tags": "digital, abstract, wallpaper"})
+    assert relevant("computer processor", {"tags": "computer, processor, chip"})
+    assert relevant("server", {"tags": "network, rack"})
+    assert not relevant("close up concept", {"tags": "computer, processor"})
+
+
+def test_each_scene_uses_its_own_search_instead_of_reusing_an_earlier_query(cfg, script, monkeypatch):
+    cfg.pixabay_api_key = "private-test-key"
+    queries = ["computer processor", "network router", "laptop keyboard", "phone camera",
+               "computer memory", "server storage"]
+    for scene, query in zip(script.scenes, queries):
+        scene.visual_query = query
+    called = []
+
+    def acquire(cfg, web, query, used):
+        called.append(query)
+        index = len(called)
+        return {"kind": "stock_image", "path": str(cfg.cache_dir / f"image-{index}.jpg"),
+                "source_url": f"https://pixabay.com/photos/image-{index}/", "query": query,
+                "license": "Pixabay Content License https://pixabay.com/service/license-summary/",
+                "attribution": "Image by Creator on Pixabay"}
+
+    monkeypatch.setattr("autoyt.media.pixabay_asset", acquire)
+    assets = choose_media(cfg, None, script)
+    assert called == queries
+    assert len({a["path"] for a in assets}) == 6
+
+
+def test_same_asset_is_never_used_twice_in_one_video(cfg, script, monkeypatch):
+    cfg.pixabay_api_key = "private-test-key"
+    asset = {"kind": "stock_image", "path": str(cfg.cache_dir / "repeated.jpg"),
+             "source_url": "https://pixabay.com/photos/repeated-12/",
+             "license": "Pixabay Content License https://pixabay.com/service/license-summary/",
+             "attribution": "Image by Creator on Pixabay"}
+    monkeypatch.setattr("autoyt.media.pixabay_asset", lambda *args: dict(asset))
+    assets = choose_media(cfg, None, script)
+    assert assets[0]["kind"] == "stock_image"
+    assert all(a["kind"] == "graphics" for a in assets[1:])
+
+
+def test_search_budget_does_not_substitute_a_different_scene_query(cfg, script, monkeypatch):
+    cfg.pixabay_api_key = "private-test-key"
+    script.scenes += [script.scenes[0].model_copy(deep=True)]
+    for i, scene in enumerate(script.scenes):
+        scene.visual_query = f"computer component {i}"
+    called = []
+    monkeypatch.setattr("autoyt.media.pixabay_asset", lambda cfg, web, query, used: called.append(query))
+    assets = choose_media(cfg, None, script)
+    assert called == [s.visual_query for s in script.scenes[:6]]
+    assert assets[-1]["kind"] == "graphics"

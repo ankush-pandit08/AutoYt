@@ -16,6 +16,9 @@ FILLER = {"close", "up", "closeup", "concept", "background", "blinking", "lights
 def relevant(query, hit):
     # Search APIs can return unrelated matches to generic words such as "close up".
     terms = words(query) - FILLER
+    if not terms:
+        return False
+    required = min(2, len(terms))
     if "server" in terms or "servers" in terms:
         terms |= {"network", "networking", "data", "router", "rack"}
     if "lock" in terms:
@@ -31,7 +34,8 @@ def relevant(query, hit):
         return False
     if tag_words & {"heart", "love", "romance", "valentine"} and not terms & {"heart", "love", "romance"}:
         return False
-    return bool(terms & tag_words)
+    # Two specific matching terms are preferable to a single generic keyword hit.
+    return len(terms & tag_words) >= required
 
 
 def search(cfg, web, query, kind):
@@ -52,7 +56,7 @@ def search(cfg, web, query, kind):
 
 
 def acquire(cfg, web, query, used):
-    for kind in ("video", "image"):
+    for kind in ("image", "video"):
         for hit in search(cfg, web, query, kind).get("hits", []):
             if not relevant(query, hit):
                 continue
