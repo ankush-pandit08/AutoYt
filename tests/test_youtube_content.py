@@ -99,6 +99,29 @@ def test_overlong_original_draft_is_supplied_for_bounded_shortening(cfg, script)
             return long
         assert data["previous_draft"] == long.model_dump()
         assert "Narration has" in data["previous_problem"]
+        assert "SHORTEN" in data["revision_instruction"]
+        return draft(script)
+
+    result = youtube_content.generate(cfg, SimpleNamespace(structured=structured), topic,
+                                      youtube_content.brief(topic))
+    assert 60 <= len(result.script.split()) <= 115 and len(calls) == 2
+
+
+def test_short_original_draft_is_expanded_instead_of_shortened(cfg, script):
+    topic = youtube_content.topics_from_items([item()], cfg)[0]
+    short = draft(script)
+    short.narration = ["This technology changes how people use their devices." for _ in range(6)]
+    calls = []
+
+    def structured(schema, instruction, data):
+        calls.append(data)
+        if len(calls) == 1:
+            return short
+        assert data["previous_draft"] == short.model_dump()
+        assert "Narration has 48 words; use 60–115" in data["previous_problem"]
+        assert "EXPAND" in data["revision_instruction"]
+        assert "Do not invent facts" in data["revision_instruction"]
+        assert "When previous_draft is supplied, SHORTEN" not in instruction
         return draft(script)
 
     result = youtube_content.generate(cfg, SimpleNamespace(structured=structured), topic,

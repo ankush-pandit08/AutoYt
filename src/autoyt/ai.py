@@ -267,7 +267,7 @@ def assemble_script(draft):
     data["hook"] = draft.scenes[0].narration.strip()
     count = len(data["script"].split())
     if not 60 <= count <= 115:
-        raise ValueError(f"Narration has {count} words; write 85–100 total words across all six scenes")
+        raise ValueError(f"Narration has {count} words; use 60–115 total words across all six scenes (aim for 84)")
     return Script.model_validate(data)
 
 

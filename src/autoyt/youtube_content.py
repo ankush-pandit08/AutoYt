@@ -149,6 +149,14 @@ def generate(cfg, llm, topic, source, duration_feedback=None, reviewed_draft=Non
     feedback = duration_feedback
     previous_draft = None
     for _ in range(2):
+        revision = "Repair any reported formatting or language issue while keeping the narration concise."
+        if previous_draft is not None and not provided_narration:
+            count = len(" ".join(previous_draft.narration).split())
+            if count < 60:
+                revision = ("EXPAND the short draft toward 84 words using clearer explanations of the supplied "
+                            "material. Do not invent facts or repeat sentences as filler.")
+            elif count > 115 or duration_feedback:
+                revision = "SHORTEN the draft toward 84 words without adding facts or expanding it."
         draft = reviewed_draft or llm.structured(ai.EditorialDraft,
             f"Create an ORIGINAL six-scene technology Short in {language}. "
             "Use the supplied YouTube titles and descriptions as topic material, not independently verified evidence. "
@@ -163,7 +171,7 @@ def generate(cfg, llm, topic, source, duration_feedback=None, reviewed_draft=Non
             "Return exactly SIX SHORT narration passages of 12–16 words EACH, each ending in sentence "
             "punctuation. Aim for 84 words TOTAL; the absolute maximum is 115 words across all six passages. "
             "Use one compact idea per passage, not several explanatory sentences. "
-            "When previous_draft is supplied, SHORTEN that draft without adding facts or expanding it. "
+            "When previous_draft is supplied, follow revision_instruction to correct previous_problem. "
             "Use spoken words only, without URLs, channel intros or production directions. Write an original factual "
             "title (10–90 characters), a description (30–600 characters), and a 3–5 word thumbnail (max 40 characters). "
             "Generate six distinct English visual queries (3–7 words, max 80 characters each) "
@@ -173,6 +181,7 @@ def generate(cfg, llm, topic, source, duration_feedback=None, reviewed_draft=Non
             "split into six complete scenes; do not rewrite it to match the suggested arc or word-count target.",
             {"topic": topic.title, "source_brief": source.model_dump(), "provided_narration": provided_narration,
              "previous_draft": previous_draft.model_dump() if previous_draft else None,
+             "revision_instruction": revision,
              "previous_problem": feedback})
         try:
             script = ai.writer_script(draft, topic, source_basis=source.basis,
