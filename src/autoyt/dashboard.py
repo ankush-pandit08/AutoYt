@@ -148,6 +148,7 @@ class Dashboard:
                              "visibility": cfg.youtube_privacy, "uploads_enabled": cfg.enable_upload,
                              "language": cfg.narration_language, "voice": cfg.tts_voice,
                              "tts_engine": cfg.tts_engine,
+                             "content_mode": cfg.content_mode,
                              "model": (cfg.gemini_model if cfg.llm_provider == "gemini" else
                                        cfg.groq_model if cfg.llm_provider == "groq" else cfg.ollama_model),
                              "pixabay": bool(cfg.pixabay_api_key),
@@ -161,17 +162,23 @@ class Dashboard:
                 "disk_free_gb": round(shutil.disk_usage(cfg.output_dir).free / 1024**3, 1),
                 "jobs": jobs, "events": events,
                 "daily_plan": ({"date": plan["date"], "state": plan["state"], "error": plan.get("error"),
+                                "content_mode": plan.get("content_mode", "verified_news"),
                                 "rejected": plan.get("rejected", []),
                                 "entries": [{"slot": e["slot"], "title": e["script"]["title"],
                                              "script": e["script"]["script"]} for e in plan["entries"]]}
                                if plan else None),
-                "writing_warning": "Trending sources guide topic selection. Engagement and virality are not guaranteed. Failed evidence or quality checks stop publication."}
+                "writing_warning": ("YouTube titles and descriptions guide original scripts. Independent fact "
+                    "checking is disabled; no transcripts or full videos are retrieved. Popularity is a topic "
+                    "signal, not proof of accuracy. Audio, license and video checks still apply."
+                    if cfg.content_mode == "youtube_insights" else
+                    "Trending sources guide topic selection. Engagement and virality are not guaranteed. "
+                    "Failed evidence or quality checks stop publication.")}
 
     def detail(self, job_id):
         if not JOB_ID.fullmatch(job_id):
             raise ValueError("Invalid job")
         result = self.store.get(job_id)
-        for kind in ("request", "script", "research", "editorial", "content_package", "research_attempts", "media_assets", "media_license_audit", "validation", "youtube"):
+        for kind in ("request", "script", "research", "source_brief", "editorial", "content_package", "research_attempts", "media_assets", "media_license_audit", "validation", "youtube"):
             value = self.store.load(job_id, kind)
             if kind == "media_assets" and value:
                 value = [{k: v for k, v in asset.items() if k != "path"} for asset in value]

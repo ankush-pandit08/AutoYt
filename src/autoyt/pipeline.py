@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import portalocker
 
-from . import ai, audio, discovery, licensing, media, research, video, youtube
+from . import ai, audio, discovery, licensing, media, research, video, youtube, youtube_content
 from .manual import ManualRequest, find_candidates
 from .models import Research, Script, Topic
 from .net import Web
@@ -38,10 +38,16 @@ class Pipeline:
         with pipeline_lock(self.cfg):
             if prepared:
                 selected = Topic.model_validate(prepared["topic"])
-                evidence = Research.model_validate(prepared["research"])
                 script = Script.model_validate(prepared["script"])
-                research.verify_claims(evidence.claims, research.independent_sources(evidence.sources))
-                ai.validate_grounding(script, evidence)
+                if prepared.get("source_brief"):
+                    source = youtube_content.SourceBrief.model_validate(prepared["source_brief"])
+                    if script.source_basis != source.basis or (source.basis == "youtube" and not source.videos):
+                        raise ValueError("Prepared script does not match its saved source basis")
+                else:
+                    evidence = Research.model_validate(prepared["research"])
+                    if self.cfg.content_mode != "youtube_insights":
+                        research.verify_claims(evidence.claims, research.independent_sources(evidence.sources))
+                        ai.validate_grounding(script, evidence)
             # Interrupted active work takes priority over creating another job.
             active = [j for j in self.store.jobs(limit=None) if j["state"] in STAGES + ["CREATED", "UPLOADING"]]
             if active:
@@ -61,14 +67,15 @@ class Pipeline:
                     if slot:
                         self._save(job_id, folder, "morning_plan", {"date": slot[:10]})
                     if discovery.duplicate(selected.title, self.store.recent_topics(
-                            self.cfg.topic_dedup_days, self.cfg.youtube_privacy)) or discovery.repeated_insight(
+                            self.cfg.topic_dedup_days, self.cfg.youtube_privacy)) or (not prepared.get("source_brief") and discovery.repeated_insight(
                                 [c.claim for c in evidence.claims], self.store.recent_research(
-                                    self.cfg.topic_dedup_days, job_id, self.cfg.youtube_privacy)):
+                                    self.cfg.topic_dedup_days, job_id, self.cfg.youtube_privacy))):
                         self.store.update(job_id, "SKIPPED", error="Morning story already covered")
                         return job_id
                     self.store.reserve_topic(job_id, selected.title, discovery.fingerprint(selected.title),
                                              self.cfg.youtube_privacy, self.cfg.topic_dedup_days)
-                    for name, value in (("topic", selected), ("research", evidence), ("script", script)):
+                    source_artifact = ("source_brief", source) if prepared.get("source_brief") else ("research", evidence)
+                    for name, value in (("topic", selected), source_artifact, ("script", script)):
                         self._save(job_id, folder, name, value)
                     self.store.update(job_id, "SCRIPTING", stage=3, topic=selected.title)
                 return self.execute(job_id)
@@ -104,6 +111,18 @@ class Pipeline:
         write_json(folder / (name + ".json"), value)
         self.store.save(job_id, name, value)
 
+    def _generate_script(self, job_id, *args, **kwargs):
+        topic = Topic.model_validate(self.store.load(job_id, "topic"))
+        source = self.store.load(job_id, "source_brief")
+        if source:
+            return youtube_content.generate(self.cfg, self.llm, topic,
+                youtube_content.SourceBrief.model_validate(source), *args, **kwargs)
+        if self.cfg.content_mode == "youtube_insights":
+            raise ValueError("This saved run uses the previous verified-news workflow. "
+                             "Start a new run to use YouTube topics without fact verification")
+        return ai.generate(self.cfg, self.llm, topic,
+                           Research.model_validate(self.store.load(job_id, "research")), *args, **kwargs)
+
     def execute(self, job_id):
         cfg, db = self.cfg, self.store
         job = db.get(job_id)
@@ -128,7 +147,8 @@ class Pipeline:
                         candidates = (find_candidates(cfg, self.web, self.llm, request) if request else
                                       discovery.discover(cfg, self.web))
                         previous = db.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
-                        previous += db.recent_research_rejections()
+                        if cfg.content_mode != "youtube_insights":
+                            previous += db.recent_research_rejections()
                         candidates = [t for t in candidates if not discovery.duplicate(t.title, previous)]
                         if not request and (cfg.prefer_tech_insights or cfg.topic_focus == "ai_coding"):
                             candidates = discovery.rank_insights(candidates, db.recent_topics(
@@ -136,6 +156,13 @@ class Pipeline:
                         if job["topic"] and not request:
                             candidates = [t for t in candidates if discovery.similarity(t.title, job["topic"]) >= .35]
                     if not candidates:
+                        if cfg.content_mode == "youtube_insights":
+                            db.update(job_id, "SKIPPED", error=(
+                                "No recent, nonduplicate YouTube technology video matched your topic. "
+                                "Add a YouTube video link or choose a different topic." if request else
+                                "No recent, nonduplicate YouTube technology topics available. "
+                                "Try again later; Google Trends and RSS fallbacks are disabled."))
+                            return job_id
                         if request:
                             db.update(job_id, "SKIPPED", error="No verified candidate for your chosen topic. "
                                       "Add official and independent source links or try again later. "
@@ -153,60 +180,67 @@ class Pipeline:
                                      cfg.youtube_privacy, cfg.topic_dedup_days)
                     db.update(job_id, STAGES[index], topic=candidates[0].title)
                 elif index == 1:
-                    candidates = [Topic.model_validate(t) for t in (db.load(job_id, "candidates") or [])
-                                  if isinstance(t, dict)]
-                    if job["retries"]:
-                        fresh = (find_candidates(cfg, self.web, self.llm, request) if request else
-                                 discovery.discover(cfg, self.web))
-                        requested = (db.load(job_id, "request") or {}).get("topic_filter")
-                        if requested and not request:
-                            fresh = [t for t in fresh if discovery.similarity(t.title, requested) >= .35]
-                        # Refresh matching URLs as well as order; saved feed entries can be stale.
-                        candidates = list({t.url: t for t in [*candidates, *fresh]}.values())
-                        self._save(job_id, folder, "candidates", [t.model_dump(mode="json") for t in candidates])
-                    selected = Topic.model_validate(db.load(job_id, "topic"))
-                    selected = next((t for t in candidates if t.url == selected.url), selected)
-                    choices = [selected, *[t for t in candidates if t.url != selected.url]]
-                    previous = db.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
-                    previous = [title for title in previous if title != selected.title]
-                    if not request and (cfg.prefer_tech_insights or cfg.topic_focus == "ai_coding"):
-                        choices = discovery.rank_insights(choices, previous, cfg.topic_focus, job.get("slot"))
-                    # Ineligible entries must not consume the research budget.
-                    choices = [t for t in choices if not discovery.duplicate(t.title, previous)
-                               and (t.content_kind == "evergreen" or
-                                    0 <= (datetime.now(timezone.utc)-t.published_at).total_seconds()
-                                    <= discovery.MAX_STORY_AGE_SECONDS)]
-                    choices = ([t for t in choices if t.content_kind == "news"][:cfg.research_candidate_limit]
-                               + [t for t in choices if t.content_kind == "evergreen"])
-                    prior_evidence = db.recent_research(cfg.topic_dedup_days, job_id, cfg.youtube_privacy)
-                    failures = []
-                    for candidate in choices:
-                        self._save(job_id, folder, "topic", candidate)
-                        db.update(job_id, STAGES[index], topic=candidate.title)
-                        try:
-                            result = research.research(cfg, self.web, self.llm, candidate, candidates, folder)
-                            if discovery.repeated_insight([c.claim for c in result.claims], prior_evidence):
-                                raise ValueError("Verified insight already covered; choosing a different story")
-                        except ValueError as error:
-                            retrieval_path = folder / "source_retrievals.json"
-                            retrievals = json.loads(retrieval_path.read_text(encoding="utf-8")) if retrieval_path.is_file() else []
-                            failures.append({"topic": candidate.title, "reason": str(error)[:300],
-                                             "sources": retrievals})
-                            self._save(job_id, folder, "research_attempts", failures)
-                            log.info("Research candidate rejected: %s", str(error)[:150])
-                            continue
-                        self._save(job_id, folder, "topic", candidate)
-                        db.reserve_topic(job_id, candidate.title, discovery.fingerprint(candidate.title),
-                                         cfg.youtube_privacy, cfg.topic_dedup_days)
-                        db.update(job_id, STAGES[index], topic=candidate.title)
-                        break
+                    if cfg.content_mode == "youtube_insights":
+                        selected = Topic.model_validate(db.load(job_id, "topic"))
+                        candidates = [Topic.model_validate(t) for t in (db.load(job_id, "candidates") or [])]
+                        source = youtube_content.brief(selected, candidates)
+                        self._save(job_id, folder, "source_brief", source)
+                        self._save(job_id, folder, "editorial", youtube_content.selection_details(selected, source))
                     else:
-                        raise ValueError("No verified story available among " + str(len(failures))
-                                         + " checked topics. Open run details for source access and evidence failures; "
-                                         "retry later when fresh official coverage is available.")
-                    self._save(job_id, folder, "research", result)
-                    from .editorial import selection_details
-                    self._save(job_id, folder, "editorial", selection_details(candidate, result, job.get("slot")))
+                        candidates = [Topic.model_validate(t) for t in (db.load(job_id, "candidates") or [])
+                                      if isinstance(t, dict)]
+                        if job["retries"]:
+                            fresh = (find_candidates(cfg, self.web, self.llm, request) if request else
+                                     discovery.discover(cfg, self.web))
+                            requested = (db.load(job_id, "request") or {}).get("topic_filter")
+                            if requested and not request:
+                                fresh = [t for t in fresh if discovery.similarity(t.title, requested) >= .35]
+                            # Refresh matching URLs as well as order; saved feed entries can be stale.
+                            candidates = list({t.url: t for t in [*candidates, *fresh]}.values())
+                            self._save(job_id, folder, "candidates", [t.model_dump(mode="json") for t in candidates])
+                        selected = Topic.model_validate(db.load(job_id, "topic"))
+                        selected = next((t for t in candidates if t.url == selected.url), selected)
+                        choices = [selected, *[t for t in candidates if t.url != selected.url]]
+                        previous = db.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
+                        previous = [title for title in previous if title != selected.title]
+                        if not request and (cfg.prefer_tech_insights or cfg.topic_focus == "ai_coding"):
+                            choices = discovery.rank_insights(choices, previous, cfg.topic_focus, job.get("slot"))
+                        # Ineligible entries must not consume the research budget.
+                        choices = [t for t in choices if not discovery.duplicate(t.title, previous)
+                                   and (t.content_kind == "evergreen" or
+                                        0 <= (datetime.now(timezone.utc)-t.published_at).total_seconds()
+                                        <= discovery.MAX_STORY_AGE_SECONDS)]
+                        choices = ([t for t in choices if t.content_kind == "news"][:cfg.research_candidate_limit]
+                                   + [t for t in choices if t.content_kind == "evergreen"])
+                        prior_evidence = db.recent_research(cfg.topic_dedup_days, job_id, cfg.youtube_privacy)
+                        failures = []
+                        for candidate in choices:
+                            self._save(job_id, folder, "topic", candidate)
+                            db.update(job_id, STAGES[index], topic=candidate.title)
+                            try:
+                                result = research.research(cfg, self.web, self.llm, candidate, candidates, folder)
+                                if discovery.repeated_insight([c.claim for c in result.claims], prior_evidence):
+                                    raise ValueError("Verified insight already covered; choosing a different story")
+                            except ValueError as error:
+                                retrieval_path = folder / "source_retrievals.json"
+                                retrievals = json.loads(retrieval_path.read_text(encoding="utf-8")) if retrieval_path.is_file() else []
+                                failures.append({"topic": candidate.title, "reason": str(error)[:300],
+                                                 "sources": retrievals})
+                                self._save(job_id, folder, "research_attempts", failures)
+                                log.info("Research candidate rejected: %s", str(error)[:150])
+                                continue
+                            self._save(job_id, folder, "topic", candidate)
+                            db.reserve_topic(job_id, candidate.title, discovery.fingerprint(candidate.title),
+                                             cfg.youtube_privacy, cfg.topic_dedup_days)
+                            db.update(job_id, STAGES[index], topic=candidate.title)
+                            break
+                        else:
+                            raise ValueError("No verified story available among " + str(len(failures))
+                                             + " checked topics. Open run details for source access and evidence failures; "
+                                             "retry later when fresh official coverage is available.")
+                        self._save(job_id, folder, "research", result)
+                        from .editorial import selection_details
+                        self._save(job_id, folder, "editorial", selection_details(candidate, result, job.get("slot")))
                 elif index == 2:
                     revision_path = folder / "script_revision.json"
                     revision = {}
@@ -215,8 +249,7 @@ class Pipeline:
                         log.info("Using local editorial revision; all evidence checks still apply")
                     if request and request.mode == "script":
                         revision["provided_narration"] = request.content
-                    script = ai.generate(cfg, self.llm, Topic.model_validate(db.load(job_id, "topic")),
-                                         Research.model_validate(db.load(job_id, "research")), **revision)
+                    script = self._generate_script(job_id, **revision)
                     for old in db.recent_scripts(cfg.topic_dedup_days, job_id, cfg.youtube_privacy):
                         if discovery.duplicate(script.title, [old["title"]]) or \
                                 discovery.similarity(script.script, old["script"]) > .92:
@@ -244,8 +277,7 @@ class Pipeline:
                                              "script_revision.json to fit the configured duration and retry")
                         if revision == 1:
                             raise ValueError("Narration outside duration tolerance after one revision")
-                        script = ai.generate(cfg, self.llm, Topic.model_validate(db.load(job_id, "topic")),
-                                             Research.model_validate(db.load(job_id, "research")),
+                        script = self._generate_script(job_id,
                                              f"Measured {duration:.1f}s; target {cfg.video_duration_seconds}s. "
                                              "Adjust word count within 60–115 words, preserve verified facts.")
                         self.llm.release()
@@ -266,17 +298,24 @@ class Pipeline:
                 elif index == 6:
                     self._save(job_id, folder, "media_license_audit", licensing.audit(db.load(job_id, "media_assets")))
                     script = Script.model_validate(db.load(job_id, "script"))
-                    evidence = Research.model_validate(db.load(job_id, "research"))
-                    research.verify_claims(evidence.claims, research.independent_sources(evidence.sources))
-                    ai.validate_grounding(script, evidence)
+                    if script.source_basis == "verified" and cfg.content_mode != "youtube_insights":
+                        evidence = Research.model_validate(db.load(job_id, "research"))
+                        research.verify_claims(evidence.claims, research.independent_sources(evidence.sources))
+                        ai.validate_grounding(script, evidence)
                     result = video.quality(cfg, folder / "final.mp4", db.load(job_id, "caption_timing"),
                                            folder / "narration.wav")
                     self._save(job_id, folder, "validation", result)
-                    from .editorial import content_package
-                    self._save(job_id, folder, "content_package", content_package(
-                        Topic.model_validate(db.load(job_id, "topic")), evidence, script,
-                        db.load(job_id, "caption_timing"), db.load(job_id, "media_assets"), folder,
-                        job.get("slot")))
+                    topic = Topic.model_validate(db.load(job_id, "topic"))
+                    if script.source_basis != "verified":
+                        package = youtube_content.content_package(topic,
+                            youtube_content.SourceBrief.model_validate(db.load(job_id, "source_brief")), script,
+                            db.load(job_id, "caption_timing"), db.load(job_id, "media_assets"), folder)
+                    else:
+                        from .editorial import content_package
+                        evidence = Research.model_validate(db.load(job_id, "research"))
+                        package = content_package(topic, evidence, script, db.load(job_id, "caption_timing"),
+                                                  db.load(job_id, "media_assets"), folder, job.get("slot"))
+                    self._save(job_id, folder, "content_package", package)
                     db.update(job_id, "VALIDATING", content_hash=digest(folder / "final.mp4"))
                 db.update(job_id, STAGES[index], stage=index+1)
             db.update(job_id, "READY_TO_UPLOAD")

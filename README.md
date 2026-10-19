@@ -2,7 +2,11 @@
 
 Personal, local automation for **one** technology YouTube channel. Python, SQLite, optional Ollama or Gemini/Groq API, local or Gemini narration and FFmpeg. No account system, payments, queue service, or cloud hosting. An optional dashboard runs on localhost using Python's standard library.
 
-Discovery → retrieved evidence → original script → voice → relevant licensed stock or original explanatory graphics → animated captions → cover → media validation → upload with the configured **private or public** visibility.
+YouTube technology discovery → original script → voice → relevant licensed stock or original explanatory graphics → animated captions → cover → media validation → upload with the configured **private or public** visibility.
+
+**Current default: `CONTENT_MODE=youtube_insights`.** Topics come only from YouTube Data API Science & Technology popular charts and, when needed, recent technology videos ordered by views. Ranking also considers views per hour and freshness within seven days; these are popularity signals, not proof that a story is true. Public titles/descriptions are cached for 30 minutes and used to write original scripts. Videos/transcripts are not downloaded or copied. Independent fact verification, the two-publisher requirement and evidence-quotation audits are disabled in this mode; saved packages explicitly say `fact_check_status=not_checked`. English male Kokoro narration, duplicate prevention, license checks, audio/duration checks and upload recovery remain active. Existing YouTube OAuth credentials are reused; no additional discovery key is required. The morning script plan and manual topic/script box both support this mode. Optional manual topic references must be YouTube video links; a supplied script can run directly without source research.
+
+`CONTENT_MODE=verified_news` retains the older RSS/Google Trends and independent-evidence workflow described below. It is not a fallback when YouTube is unavailable. Old failed research runs retain their saved sources; start a new run to use the YouTube workflow. The existing once-a-day plan is preserved until the next morning; switching modes does not regenerate videos or upload anything automatically.
 
 ## Start on Windows
 

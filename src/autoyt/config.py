@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     schedule_times: str = "08:00,14:00,20:00"
     daily_script_batch: bool = False
     morning_plan_time: str = Field(default="05:00", pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
+    content_mode: Literal["youtube_insights", "verified_news"] = "youtube_insights"
+    youtube_discovery_region: str = Field(default="IN", pattern=r"^[A-Z]{2}$")
     ollama_base_url: str = "http://127.0.0.1:11434"
     llm_provider: Literal["ollama", "groq", "gemini"] = "ollama"
     gemini_api_key: str = Field(default="", repr=False)

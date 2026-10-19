@@ -13,6 +13,7 @@ class Topic(BaseModel):
     volume: int | None = None
     related_urls: list[str] = []
     creator_references: list[dict[str, str]] = []
+    youtube_metadata: dict = Field(default_factory=dict)
     score: float = 0
 
     @model_validator(mode="after")
@@ -55,7 +56,7 @@ class Scene(BaseModel):
     narration: str = Field(min_length=10, max_length=500)
     visual_query: str = Field(min_length=3, max_length=100)
     headline: str = Field(min_length=3, max_length=65)
-    claim_ids: list[int] = Field(min_length=1)
+    claim_ids: list[int] = Field(default_factory=list)
 
 
 class Script(BaseModel):
@@ -68,11 +69,19 @@ class Script(BaseModel):
     visual_keywords: list[str] = Field(min_length=1, max_length=10)
     thumbnail_text: str = Field(min_length=3, max_length=40)
     scenes: list[Scene] = Field(min_length=6, max_length=10)
-    source_urls: list[str] = Field(min_length=2)
+    source_urls: list[str] = Field(default_factory=list)
+    source_basis: Literal["verified", "youtube", "user_input"] = "verified"
     needs_synthetic_media_disclosure: bool = False
 
     @model_validator(mode="after")
     def consistent(self):
+        if self.source_basis == "verified" and (len(self.source_urls) < 2 or any(
+                not scene.claim_ids for scene in self.scenes)):
+            raise ValueError("Verified scripts need two source URLs and evidence references in each scene")
+        if self.source_basis == "youtube" and not self.source_urls:
+            raise ValueError("YouTube scripts need a source video URL")
+        if self.source_basis != "verified" and any(scene.claim_ids for scene in self.scenes):
+            raise ValueError("Unchecked scripts cannot claim verified evidence references")
         joined = " ".join(x.narration.strip() for x in self.scenes)
         if " ".join(self.script.split()) != " ".join(joined.split()):
             raise ValueError("script must exactly concatenate scene narration")

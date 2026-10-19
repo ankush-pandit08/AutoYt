@@ -43,13 +43,21 @@ class TopicMatches(BaseModel):
 
 
 def find_candidates(cfg, web, llm, request):
+    if cfg.content_mode == "youtube_insights" and request.mode == "script":
+        return [Topic(title=request.topic, url="local:manual-script", published_at=None,
+                      source="user_input", content_kind="evergreen")]
     if request.source_urls:
+        if cfg.content_mode == "youtube_insights":
+            from .youtube_content import from_urls
+            return from_urls(cfg, request.source_urls)
         # Explicit references form an explainer, without inventing a publication timestamp.
         return [Topic(title=request.topic, url=request.source_urls[0], published_at=None,
                       source="user_references", content_kind="evergreen",
                       related_urls=request.source_urls[1:])]
     from .editorial import evergreen_topics
-    available = discovery.discover(cfg, web) + evergreen_topics()
+    available = discovery.discover(cfg, web)
+    if cfg.content_mode != "youtube_insights":
+        available += evergreen_topics()
     # A semantic check prevents a broad keyword such as AI from selecting an unrelated story.
     short = sorted(available, key=lambda t: discovery.similarity(request.topic, t.title), reverse=True)[:30]
     if not short:

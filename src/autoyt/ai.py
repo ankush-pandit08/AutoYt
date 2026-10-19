@@ -231,7 +231,7 @@ def read_revision(text):
     return schema.model_validate(data)
 
 
-def writer_script(draft, topic, research):
+def writer_script(draft, topic, research=None, *, source_basis="verified", source_urls=None):
     # Structural bookkeeping belongs to Python, leaving the local model to write.
     if any(not line.rstrip().endswith((".", "!", "?", "।", "॥")) for line in draft.narration):
         raise ValueError("Every narration scene must end with a complete punctuated sentence")
@@ -239,7 +239,8 @@ def writer_script(draft, topic, research):
                     headline=draft.headlines[i] if isinstance(draft, EditorialDraft) else " ".join(line.split()[:5]),
                     visual_query=draft.visual_queries[i] if isinstance(draft, EditorialDraft) else
                     "cloud computing technology servers",
-                    claim_ids=list(range(len(research.claims)))) for i, line in enumerate(draft.narration)]
+                    claim_ids=list(range(len(research.claims))) if research else [])
+              for i, line in enumerate(draft.narration)]
     from .editorial import category
     topic_tag = {"Artificial Intelligence & LLMs": "#AI", "Smartphones & Gadgets": "#Gadgets",
                  "Cybersecurity & Digital Awareness": "#Cybersecurity",
@@ -249,7 +250,8 @@ def writer_script(draft, topic, research):
         topic=topic.title, title=draft.title, description=draft.description,
         thumbnail_text=draft.thumbnail_text, hashtags=[topic_tag, "#Technology", "#Shorts"],
         visual_keywords=list(dict.fromkeys(scene.visual_query for scene in scenes)), scenes=scenes,
-        source_urls=[s.url for s in research.sources], needs_synthetic_media_disclosure=False))
+        source_urls=source_urls if source_urls is not None else [s.url for s in research.sources],
+        source_basis=source_basis, needs_synthetic_media_disclosure=False))
 
 
 # Narration and hook are derived from scenes rather than asking a small model to

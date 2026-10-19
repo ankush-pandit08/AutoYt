@@ -191,6 +191,9 @@ def rank_topics(topics):
 
 
 def discover(cfg, web):
+    if cfg.content_mode == "youtube_insights":
+        from .youtube_content import discover as discover_youtube
+        return discover_youtube(cfg)
     urls = [f"https://trends.google.com/trending/rss?geo={cfg.google_trends_region}", *cfg.rss_feeds]
     result = []
     for url in urls:
