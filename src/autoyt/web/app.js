@@ -41,6 +41,8 @@ function render() {
   $('toggle').disabled = !token;
   $('run').textContent = cfg.uploads_enabled ? `＋ Run now · ${cfg.visibility}` : '＋ Run now';
   $('run').disabled = $('preview').disabled = s.busy || !token;
+  $('customRun').disabled = $('customPreview').disabled = s.busy || !token;
+  $('customUploadNote').textContent = `Voice: ${cfg.tts_engine || ''} · ${cfg.voice}. ${cfg.uploads_enabled ? `Create uploads ${cfg.visibility === 'public' ? 'PUBLICLY' : 'privately'} after all checks pass.` : 'Uploads disabled.'} Preview never uploads.`;
   $('uploaded').textContent = s.daily.uploaded;
   $('target').textContent = `Auto: up to ${s.daily.limit}/day · manual runs have no app limit`;
   $('attempts').textContent = s.daily.attempts;
@@ -79,21 +81,25 @@ async function refresh() {
     if(!token || (state && next.started_at !== state.started_at)) token = (await api('/api/session')).token;
     state = next; render();
   }
-  catch { $('connection').textContent = 'Disconnected'; $('offline').hidden = false; $('run').disabled = $('preview').disabled = $('toggle').disabled = true; }
+  catch { $('connection').textContent = 'Disconnected'; $('offline').hidden = false; $('customRun').disabled = $('customPreview').disabled = $('run').disabled = $('preview').disabled = $('toggle').disabled = true; }
   finally { refreshing = false; }
 }
-async function action(name, job_id) {
+async function action(name, job_id, manual_input) {
   try {
-    const result = await api('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-AutoYT-Token':token},body:JSON.stringify({action:name,job_id})});
+    const result = await api('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-AutoYT-Token':token},body:JSON.stringify({action:name,job_id,manual_input})});
     toast(result.message); await refresh();
   } catch(error) { toast(error.message); }
 }
-function confirmAction(name, job_id) {
-  pending = {name,job_id};
+function confirmAction(name, job_id, manual_input) {
+  pending = {name,job_id,manual_input};
   const preview = name === 'preview';
   $('confirmTitle').textContent = preview ? 'Generate a preview?' : name === 'retry' ? 'Retry this failed run?' : 'Start a new run?';
   $('confirmText').textContent = preview ? 'Runs the full local pipeline without uploading. This can take several minutes.' : name === 'retry' ? 'Resumes saved progress and keeps the visibility recorded for this job. If it passes every check, a live job can upload to YouTube.' : `Finds a fresh tech story and runs the full pipeline. ${state.settings.uploads_enabled ? `If it passes every check, the video uploads ${state.settings.visibility === 'public' ? 'PUBLICLY' : 'privately'} to your pinned YouTube channel.` : 'Uploads are currently disabled.'} Manual runs have no app daily limit. Provider quotas and quality checks still apply.`;
   $('confirmAction').textContent = preview ? 'Generate preview' : name === 'retry' ? 'Retry run' : 'Start run';
+  if(manual_input) {
+    $('confirmTitle').textContent = preview ? 'Preview your input?' : 'Create from your input?';
+    $('confirmText').textContent = `${manual_input.mode === 'script' ? 'Uses your exact narration, with fact checks and scene planning.' : 'Researches only your chosen topic and writes a Hinglish script.'} No unrelated topic will be substituted. ${preview ? 'This creates a preview without uploading.' : state.settings.uploads_enabled ? `If all checks pass, the video uploads ${state.settings.visibility === 'public' ? 'PUBLICLY' : 'privately'} to your pinned channel.` : 'Uploads are disabled.'}`;
+  }
   $('confirm').showModal();
 }
 async function details(id) {
@@ -109,10 +115,32 @@ $('jobs').addEventListener('click',e=>{const b=e.target.closest('[data-job]');if
 $('detailBody').addEventListener('click',e=>{const b=e.target.closest('[data-retry]');if(b){$('details').close();confirmAction('retry',b.dataset.retry);}});
 $('closeDetails').onclick=()=>{$('details').querySelector('video')?.pause();$('details').close();};
 $('details').addEventListener('close',()=>{$('details').querySelector('video')?.pause();});
-$('preview').onclick=()=>confirmAction('preview');
-$('run').onclick=()=>confirmAction('run');
+$('preview').onclick=()=>$('customContent').value.trim() ? customRun(true) : confirmAction('preview');
+$('run').onclick=()=>$('customContent').value.trim() ? customRun(false) : confirmAction('run');
 $('toggle').onclick=()=>action(state.auto_enabled?'pause':'resume');
 $('cancelAction').onclick=()=>$('confirm').close();
-$('confirmAction').onclick=()=>{const task=pending;$('confirm').close();action(task.name,task.job_id);};
+$('confirmAction').onclick=()=>{const task=pending;$('confirm').close();action(task.name,task.job_id,task.manual_input);};
+function updateCustomInput() {
+  const script = $('customMode').value === 'script', content = $('customContent');
+  $('customTopicRow').hidden = !script;
+  $('customTopic').required = script;
+  content.maxLength = script ? 5000 : 180;
+  content.rows = script ? 6 : 3;
+  $('customLabel').textContent = script ? 'Paste your narration' : 'What should this video be about?';
+  $('customHelp').textContent = script ? '60–115 words, at least six complete sentences. Hindi words in Devanagari, English tech words as normal. Your words stay unchanged; unsupported facts stop the run.' : 'We research only this topic and write an engaging Hinglish script. If it cannot be verified, the run stops.';
+  $('customCount').textContent = script ? `${content.value.trim().split(/\s+/).filter(Boolean).length} / 60–115 words` : `${content.value.length} / 180 characters`;
+}
+function customRun(preview) {
+  if(!state || state.busy || !$('customForm').reportValidity()) return;
+  const input = {mode:$('customMode').value, content:$('customContent').value.trim(), topic:$('customTopic').value.trim(), source_urls:$('customSources').value.split(/\n/).map(s=>s.trim()).filter(Boolean)};
+  const count = input.content.split(/\s+/).length;
+  if(input.mode === 'script' && (count < 60 || count > 115)) return toast('Use 60–115 words for your script.');
+  if(input.source_urls.length > 6) return toast('Add up to six source links.');
+  confirmAction(preview ? 'preview' : 'run', undefined, input);
+}
+$('customMode').addEventListener('change', updateCustomInput);
+$('customContent').addEventListener('input', updateCustomInput);
+$('customForm').addEventListener('submit', e=>{e.preventDefault();customRun(false);});
+$('customPreview').onclick=()=>customRun(true);
 async function boot(){try{token=(await api('/api/session')).token;}catch{}await refresh();setInterval(refresh,5000);}
 boot();

@@ -7,6 +7,21 @@
   --line:#e8edf1;
   --green:#157458;
   --navy:#101f31}
+.custom-card{padding:24px;margin-bottom:20px}
+.custom-card label{display:block;font-size:13px;font-weight:600;margin:12px 0 8px}
+.custom-type{display:flex;align-items:center;gap:14px;margin-bottom:14px}
+.custom-type label{margin:0}
+.custom-card textarea,.custom-card input{display:block;width:100%;border:1px solid #d8e1e7;border-radius:10px;padding:13px 15px;background:#fcfdfd;color:var(--navy);font:inherit;font-size:14px;line-height:1.6}
+.custom-card textarea{resize:vertical;min-height:86px}
+.custom-card textarea:focus,.custom-card input:focus{outline:2px solid #60bb99;outline-offset:2px}
+.custom-help,.custom-footer{display:flex;justify-content:space-between;gap:18px;align-items:center}
+.custom-help{align-items:baseline;color:var(--muted);font-size:12px;line-height:1.6}
+.custom-help p{max-width:760px}
+.custom-help span{white-space:nowrap}
+.custom-sources{font-size:13px;margin:12px 0 20px}
+.custom-sources summary{cursor:pointer;color:var(--green)}
+.custom-footer .small-note{margin:0;max-width:480px}
+@media(max-width:850px){.custom-help,.custom-footer{flex-direction:column;align-items:flex-start;gap:6px}.custom-footer .actions{margin-top:12px;flex-wrap:wrap}.custom-card{padding:20px}}
 *{
   box-sizing:border-box}
 body{

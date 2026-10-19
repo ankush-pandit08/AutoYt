@@ -15,7 +15,9 @@ from zoneinfo import ZoneInfo
 
 import portalocker
 from apscheduler.schedulers.background import BackgroundScheduler
+from pydantic import ValidationError
 
+from .manual import ManualRequest
 from .pipeline import Pipeline, pipeline_lock
 from .scheduling import configure
 from .store import Store, write_json
@@ -70,7 +72,11 @@ class Dashboard:
         except portalocker.exceptions.LockException:
             return True
 
-    def action(self, action, job_id=None):
+    def action(self, action, job_id=None, manual_input=None):
+        if manual_input is not None:
+            if action not in ("run", "preview"):
+                raise ValueError("Custom input is only available for a new run or preview")
+            manual_input = ManualRequest.model_validate(manual_input).model_dump()
         with self.guard:
             if action in ("pause", "resume"):
                 enabled = action == "resume"
@@ -88,13 +94,15 @@ class Dashboard:
                 if not JOB_ID.fullmatch(job_id or "") or self.store.get(job_id)["state"] != "FAILED":
                     raise ValueError("Only a failed job can be retried here")
             self.notice = ""
-            self.future = self.executor.submit(self._run, action, job_id)
+            self.future = self.executor.submit(self._run, action, job_id, manual_input)
             return {"message": "Run started. Progress updates automatically."}
 
-    def _run(self, action, job_id):
+    def _run(self, action, job_id, manual_input=None):
         try:
             runner = Pipeline(self.cfg)
-            result = runner.retry(job_id) if action == "retry" else runner.create_run(dry_run=action == "preview")
+            options = {"manual_input": manual_input} if manual_input else {}
+            result = runner.retry(job_id) if action == "retry" else runner.create_run(
+                dry_run=action == "preview", **options)
             if result:
                 job = self.store.get(result)
                 if job["state"] in ("FAILED", "SKIPPED"):
@@ -139,6 +147,7 @@ class Dashboard:
                              "daily_script_batch": cfg.daily_script_batch, "morning_plan_time": cfg.morning_plan_time,
                              "visibility": cfg.youtube_privacy, "uploads_enabled": cfg.enable_upload,
                              "language": cfg.narration_language, "voice": cfg.tts_voice,
+                             "tts_engine": cfg.tts_engine,
                              "model": (cfg.gemini_model if cfg.llm_provider == "gemini" else
                                        cfg.groq_model if cfg.llm_provider == "groq" else cfg.ollama_model),
                              "pixabay": bool(cfg.pixabay_api_key),
@@ -162,7 +171,7 @@ class Dashboard:
         if not JOB_ID.fullmatch(job_id):
             raise ValueError("Invalid job")
         result = self.store.get(job_id)
-        for kind in ("script", "research", "editorial", "content_package", "research_attempts", "media_assets", "media_license_audit", "validation", "youtube"):
+        for kind in ("request", "script", "research", "editorial", "content_package", "research_attempts", "media_assets", "media_license_audit", "validation", "youtube"):
             value = self.store.load(job_id, kind)
             if kind == "media_assets" and value:
                 value = [{k: v for k, v in asset.items() if k != "path"} for asset in value]
@@ -267,13 +276,15 @@ def make_server(app, port):
                 return self.send(404, {"error": "Not found"})
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= 2048:
+                if not 0 < length <= 32768:
                     raise ValueError("Invalid request size")
                 value = json.loads(self.rfile.read(length))
                 if not isinstance(value, dict):
                     raise ValueError("Invalid request")
-                result = app.action(value.get("action"), value.get("job_id"))
+                result = app.action(value.get("action"), value.get("job_id"), value.get("manual_input"))
                 return self.send(200, result)
+            except ValidationError as error:
+                return self.send(409, {"error": error.errors()[0]["msg"]})
             except (ValueError, TypeError):
                 return self.send(409, {"error": "Action unavailable. A run may be active, or the job is not retryable."})
             except Exception:

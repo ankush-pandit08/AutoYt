@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import portalocker
 
 from . import ai, audio, discovery, licensing, media, research, video, youtube
+from .manual import ManualRequest, find_candidates
 from .models import Research, Script, Topic
 from .net import Web
 from .store import Store, digest, write_json
@@ -30,7 +31,10 @@ class Pipeline:
         self.web = Web()
         self.llm = ai.LLM(cfg)
 
-    def create_run(self, dry_run=False, topic=None, slot=None, prepared=None):
+    def create_run(self, dry_run=False, topic=None, slot=None, prepared=None, manual_input=None):
+        request = ManualRequest.model_validate(manual_input) if manual_input is not None else None
+        if request and (slot or prepared or topic):
+            raise ValueError("A custom request must be a separate manual run")
         with pipeline_lock(self.cfg):
             if prepared:
                 selected = Topic.model_validate(prepared["topic"])
@@ -41,12 +45,16 @@ class Pipeline:
             # Interrupted active work takes priority over creating another job.
             active = [j for j in self.store.jobs(limit=None) if j["state"] in STAGES + ["CREATED", "UPLOADING"]]
             if active:
+                if request:
+                    raise ValueError("Retry or finish the interrupted run before starting your custom input")
                 if bool(active[-1]["dry_run"]) != dry_run:
                     raise ValueError("An interrupted job has a different dry-run mode; retry its ID first")
                 return self.execute(active[-1]["id"])
-            job_id = self.store.create(dry_run, topic, slot, self.cfg.max_videos_per_day, self.cfg.timezone)
+            job_id = self.store.create(dry_run, request.topic if request else topic, slot,
+                                       self.cfg.max_videos_per_day, self.cfg.timezone)
             if job_id:
-                self.store.save(job_id, "request", {"topic_filter": topic})
+                self.store.save(job_id, "request", {"topic_filter": request.topic if request else topic,
+                    "manual_input": request.model_dump() if request else None})
                 if prepared:
                     folder = self.cfg.output_dir / job_id
                     folder.mkdir(parents=True, exist_ok=True)
@@ -107,6 +115,8 @@ class Pipeline:
             if shutil.disk_usage(folder).free < cfg.min_free_gb * 1024**3:
                 raise RuntimeError("CONFIGURATION: insufficient disk space")
             start = job["stage"]
+            manual_input = (db.load(job_id, "request") or {}).get("manual_input")
+            request = ManualRequest.model_validate(manual_input) if manual_input else None
             for index in range(start, len(STAGES)):
                 db.update(job_id, STAGES[index], error=None)
                 log.info("Job %s: %s", job_id, STAGES[index])
@@ -115,16 +125,22 @@ class Pipeline:
                     if saved:
                         candidates = [Topic.model_validate(saved)]
                     else:
-                        candidates = discovery.discover(cfg, self.web)
+                        candidates = (find_candidates(cfg, self.web, self.llm, request) if request else
+                                      discovery.discover(cfg, self.web))
                         previous = db.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
                         previous += db.recent_research_rejections()
                         candidates = [t for t in candidates if not discovery.duplicate(t.title, previous)]
-                        if cfg.prefer_tech_insights or cfg.topic_focus == "ai_coding":
+                        if not request and (cfg.prefer_tech_insights or cfg.topic_focus == "ai_coding"):
                             candidates = discovery.rank_insights(candidates, db.recent_topics(
                                 cfg.topic_dedup_days, cfg.youtube_privacy), cfg.topic_focus, job.get("slot"))
-                        if job["topic"]:
+                        if job["topic"] and not request:
                             candidates = [t for t in candidates if discovery.similarity(t.title, job["topic"]) >= .35]
                     if not candidates:
+                        if request:
+                            db.update(job_id, "SKIPPED", error="No verified candidate for your chosen topic. "
+                                      "Add official and independent source links or try again later. "
+                                      "No alternative topic was selected.")
+                            return job_id
                         db.update(job_id, "SKIPPED", error="No fresh, relevant, nonduplicate technology topic; "
                                   "stories rejected by evidence checks rest for six hours. Retry a saved run "
                                   "to recheck its story sooner.")
@@ -140,9 +156,10 @@ class Pipeline:
                     candidates = [Topic.model_validate(t) for t in (db.load(job_id, "candidates") or [])
                                   if isinstance(t, dict)]
                     if job["retries"]:
-                        fresh = discovery.discover(cfg, self.web)
+                        fresh = (find_candidates(cfg, self.web, self.llm, request) if request else
+                                 discovery.discover(cfg, self.web))
                         requested = (db.load(job_id, "request") or {}).get("topic_filter")
-                        if requested:
+                        if requested and not request:
                             fresh = [t for t in fresh if discovery.similarity(t.title, requested) >= .35]
                         # Refresh matching URLs as well as order; saved feed entries can be stale.
                         candidates = list({t.url: t for t in [*candidates, *fresh]}.values())
@@ -152,7 +169,7 @@ class Pipeline:
                     choices = [selected, *[t for t in candidates if t.url != selected.url]]
                     previous = db.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
                     previous = [title for title in previous if title != selected.title]
-                    if cfg.prefer_tech_insights or cfg.topic_focus == "ai_coding":
+                    if not request and (cfg.prefer_tech_insights or cfg.topic_focus == "ai_coding"):
                         choices = discovery.rank_insights(choices, previous, cfg.topic_focus, job.get("slot"))
                     # Ineligible entries must not consume the research budget.
                     choices = [t for t in choices if not discovery.duplicate(t.title, previous)
@@ -196,6 +213,8 @@ class Pipeline:
                     if revision_path.is_file():
                         revision["reviewed_draft"] = ai.read_revision(revision_path.read_text(encoding="utf-8"))
                         log.info("Using local editorial revision; all evidence checks still apply")
+                    if request and request.mode == "script":
+                        revision["provided_narration"] = request.content
                     script = ai.generate(cfg, self.llm, Topic.model_validate(db.load(job_id, "topic")),
                                          Research.model_validate(db.load(job_id, "research")), **revision)
                     for old in db.recent_scripts(cfg.topic_dedup_days, job_id, cfg.youtube_privacy):
@@ -212,6 +231,10 @@ class Pipeline:
                         duration = segments[-1]["end"]
                         if cfg.duration_min <= duration <= cfg.duration_max:
                             break
+                        if request and request.mode == "script":
+                            raise ValueError(f"Your script narration measured {duration:.1f}s, outside the "
+                                             "duration limits. Shorten or revise your input and start a new run; "
+                                             "your script was not rewritten.")
                         if db.load(job_id, "morning_plan"):
                             raise ValueError("Morning script narration outside duration limits; "
                                              "no replacement script is generated at the video slot")
