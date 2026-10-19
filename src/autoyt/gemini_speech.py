@@ -17,6 +17,8 @@ STYLE = (
     "Natural Indian male technology presenter speaking conversational Hinglish. "
     "Warm, clear, energetic but relaxed. Natural Indian English pronunciation of English "
     "tech words with smooth Hindi transitions. Moderate pace, brief natural pauses, "
+    "make each sentence easy to follow, with conversational emphasis on the hook and key takeaway; "
+    "speak the transcript exactly without translating, rewriting, or adding words; "
     "no shouting or exaggerated announcer delivery.")
 
 
