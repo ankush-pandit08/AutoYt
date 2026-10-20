@@ -112,4 +112,8 @@ def segment(cfg, text, path):
                 raise RuntimeError("TRANSIENT: Gemini speech unavailable; retry uses saved audio") from None
             time.sleep(2 ** attempt)
         except (ValueError, KeyError, IndexError, TypeError, RuntimeError):
+            if attempt < 2:
+                log.info("Gemini returned invalid audio; retrying the same provider")
+                time.sleep(1)
+                continue
             raise ValueError("Gemini narration response failed audio validation") from None

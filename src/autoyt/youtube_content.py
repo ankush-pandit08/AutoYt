@@ -145,10 +145,11 @@ def brief(topic, candidates=()):
 
 def generate(cfg, llm, topic, source, duration_feedback=None, reviewed_draft=None, provided_narration=None):
     language = ("English only, with plain words and short sentences" if cfg.narration_language == "en" else
-                "conversational Hinglish, with Hindi in Devanagari and familiar English tech words")
+                "conversational Hinglish, with Hindi in Devanagari and familiar English tech words"
+                if cfg.script_style == "hinglish" else "Hindi in Devanagari; use clear Hindi narration, preserving technical names")
     feedback = duration_feedback
     previous_draft = None
-    for _ in range(2):
+    for _ in range(3):
         revision = "Repair any reported formatting or language issue while keeping the narration concise."
         if previous_draft is not None and not provided_narration:
             count = len(" ".join(previous_draft.narration).split())

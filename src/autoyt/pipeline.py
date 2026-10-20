@@ -86,6 +86,15 @@ class Pipeline:
     def retry(self, job_id):
         with pipeline_lock(self.cfg):
             job = self.store.get(job_id)
+            attempt = self.store.attempt(job_id)
+            if job["stage"] >= 4 and not (self.cfg.output_dir / job_id / "final.mp4").is_file():
+                if attempt and (attempt["video_id"] or attempt["session_uri"] or attempt["state"] != "REJECTED"):
+                    # Never regenerate different bytes for an uncertain or resumable upload.
+                    youtube.upload(self.cfg, self.store, job_id, self.cfg.output_dir / job_id)
+                    return job_id
+                if self.store.load(job_id, "script"):
+                    self.store.update(job_id, job["state"], stage=3)
+                    job = self.store.get(job_id)
             revision_path = self.cfg.output_dir / job_id / "script_revision.json"
             previous = self.store.load(job_id, "script")
             if job["stage"] == 3 and previous and revision_path.is_file():

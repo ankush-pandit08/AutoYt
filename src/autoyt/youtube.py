@@ -201,6 +201,40 @@ def confirm(youtube, store, job_id, video_id):
             time.sleep(10)
 
 
+class SessionTransport:
+    """Persist the Location header before the official client sends any video bytes."""
+    def __init__(self, inner, store, job_id):
+        self.inner, self.store, self.job_id = inner, store, job_id
+
+    def request(self, uri, method="GET", *args, **kwargs):
+        response, content = self.inner.request(uri, method, *args, **kwargs)
+        if method == "POST" and response.status in (200, 201) and response.get("location"):
+            self.store.upload_progress(self.job_id, "SESSION", response["location"], 0)
+        return response, content
+
+
+def upload_error_reason(error):
+    try:
+        reasons = {item.get("reason") for item in json.loads(error.content).get("error", {}).get("errors", [])}
+    except (ValueError, TypeError, AttributeError):
+        reasons = set()
+    messages = {
+        "uploadLimitExceeded": "YouTube channel upload limit reached; wait before retrying this saved job",
+        "quotaExceeded": "YouTube API quota exhausted; retry after the quota resets",
+        "dailyLimitExceeded": "YouTube API daily limit reached; retry after reset",
+        "invalidTitle": "YouTube rejected the video title",
+        "invalidDescription": "YouTube rejected the description",
+        "invalidTags": "YouTube rejected the video tags",
+        "invalidVideoMetadata": "YouTube rejected the video metadata",
+        "forbidden": "YouTube denied upload permission; check the channel and OAuth access",
+        "insufficientPermissions": "YouTube OAuth permissions do not permit uploads; reauthorize the channel",
+    }
+    for reason, message in messages.items():
+        if reason in reasons:
+            return reason, message
+    return "httpError", "YouTube rejected the upload request"
+
+
 def upload(cfg, store, job_id, folder):
     from googleapiclient.errors import HttpError
     from googleapiclient.http import MediaFileUpload
@@ -212,6 +246,18 @@ def upload(cfg, store, job_id, folder):
     job = store.get(job_id)
     if job["dry_run"]:
         raise ValueError("Dry-run jobs cannot upload; generate a new non-dry-run job")
+    attempt = store.attempt(job_id)
+    youtube = channel = None
+    # Reconcile accepted/uncertain outcomes even after retention has removed local media.
+    if attempt and (attempt["video_id"] or (not attempt["session_uri"] and attempt["state"] != "REJECTED")):
+        youtube, channel = service(cfg)
+        video_id = attempt["video_id"] or reconcile(youtube, channel, job_id,
+            [a["video_id"] for a in (store.load(job_id, "cancelled_uploads") or []) if a.get("video_id")])
+        if video_id:
+            store.upload_progress(job_id, "RETURNED_ID", video_id=video_id)
+            return confirm(youtube, store, job_id, video_id)
+        raise RuntimeError("PERMANENT: ambiguous upload initiation; no duplicate insert allowed. "
+                           "Review YouTube Studio and this job's upload_attempts record")
     validation = json.loads((folder / "validation.json").read_text(encoding="utf-8"))
     if not validation.get("passed"):
         raise ValueError("Video has not passed validation")
@@ -231,17 +277,8 @@ def upload(cfg, store, job_id, folder):
     if job["slot"] and not attempt and store.daily_upload_count(
             cfg.timezone, scheduled_only=True) >= cfg.max_videos_per_day:
         raise RuntimeError("CONFIGURATION: daily scheduled upload limit reached; retry this saved job another day")
-    youtube, channel = service(cfg)
-    if attempt and attempt["video_id"]:
-        return confirm(youtube, store, job_id, attempt["video_id"])
-    if attempt and not attempt["session_uri"]:
-        excluded = [a["video_id"] for a in (store.load(job_id, "cancelled_uploads") or []) if a.get("video_id")]
-        video_id = reconcile(youtube, channel, job_id, excluded)
-        if video_id:
-            store.upload_progress(job_id, "RETURNED_ID", video_id=video_id)
-            return confirm(youtube, store, job_id, video_id)
-        raise RuntimeError("PERMANENT: ambiguous upload initiation; no duplicate insert allowed. "
-                           "Review YouTube Studio and this job's upload_attempts record")
+    if youtube is None:
+        youtube, channel = service(cfg)
     body = store.load(job_id, "metadata")
     # Freeze visibility per job, so changing defaults never republishes an old private video on retry.
     privacy = body["status"]["privacyStatus"]
@@ -252,7 +289,9 @@ def upload(cfg, store, job_id, folder):
     media = MediaFileUpload(str(folder / "final.mp4"), mimetype="video/mp4", chunksize=4*1024*1024,
                             resumable=True)
     request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
-    if attempt:
+    if hasattr(request, "http"):
+        request.http = SessionTransport(request.http, store, job_id)
+    if attempt and attempt["session_uri"]:
         request.resumable_uri = attempt["session_uri"]
         request.resumable_progress = attempt["progress"]
         request._in_error_state = True  # Official client's next_chunk queries server progress first.
@@ -274,7 +313,19 @@ def upload(cfg, store, job_id, folder):
         except Exception as error:
             if (store.attempt(job_id) or {}).get("video_id"):
                 raise
-            store.upload_progress(job_id, "INTERRUPTED", request.resumable_uri, request.resumable_progress)
+            session = request.resumable_uri or (store.attempt(job_id) or {}).get("session_uri")
+            request.resumable_uri = session
+            rejected = isinstance(error, HttpError) and 400 <= error.resp.status < 500 and error.resp.status != 408 and (error.resp.status != 429 or not session)
+            store.upload_progress(job_id, "REJECTED" if rejected and not session else "INTERRUPTED",
+                                  session, request.resumable_progress)
+            if rejected:
+                reason, message = upload_error_reason(error)
+                store.save(job_id, "upload_error", {"http_status": error.resp.status, "reason": reason})
+                suffix = "; session saved. Retry this job" if session else "; no video accepted. Retry this saved job"
+                raise RuntimeError("CONFIGURATION: " + message + suffix) from None
+            if not session:
+                raise RuntimeError("PERMANENT: ambiguous upload initiation; no duplicate insert allowed. "
+                                   "Retry this job to reconcile YouTube before another insert") from None
             retryable = not isinstance(error, HttpError) or error.resp.status in (429, 500, 502, 503, 504)
             if not retryable or failures >= 3:
                 status = str(error.resp.status) if isinstance(error, HttpError) else type(error).__name__

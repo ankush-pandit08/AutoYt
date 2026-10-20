@@ -2,6 +2,7 @@
 import hmac
 import json
 import logging
+import os
 import re
 import secrets
 import shutil
@@ -105,10 +106,17 @@ class Dashboard:
             if self.state_path.is_file():
                 enabled = json.loads(self.state_path.read_text(encoding="utf-8"))["enabled"] is True
             self.scheduler.start(paused=not enabled)
+            if enabled and self.cfg.daily_script_batch and os.environ.get("LOOPYT_STARTUP_PLAN") == "1":
+                self.queue_missing_plan()
         except Exception:
             self.scheduler_lock.release()
             self.scheduler_owned = False
             raise
+
+    def queue_missing_plan(self):
+        from .scheduling import prepare_missing_plan
+        self.scheduler.add_job(prepare_missing_plan, "date", args=[self.cfg], id="startup-plan",
+                               replace_existing=True, misfire_grace_time=300)
 
     def close(self):
         if self.scheduler.running:
@@ -139,6 +147,8 @@ class Dashboard:
                 write_json(self.state_path, {"enabled": enabled})
                 if enabled:
                     self.scheduler.resume()
+                    if self.cfg.daily_script_batch and os.environ.get("LOOPYT_STARTUP_PLAN") == "1":
+                        self.queue_missing_plan()
                 else:
                     self.scheduler.pause()
                 return {"message": "Auto mode resumed" if enabled else "Auto mode paused; current work can finish"}
@@ -195,7 +205,7 @@ class Dashboard:
             job["has_video"] = (folder / "final.mp4").is_file()
             job["has_cover"] = (folder / "cover.png").is_file()
         upcoming = sorted(j.next_run_time.isoformat() for j in self.scheduler.get_jobs()
-                          if getattr(j, "next_run_time", None))
+                          if j.id != "startup-plan" and getattr(j, "next_run_time", None))
         return {"now": datetime.now(zone).isoformat(), "started_at": self.started_at,
                 "auto_enabled": self.scheduler.state == 1, "busy": self.busy(), "notice": self.notice,
                 "voice_settings": record(cfg),

@@ -31,6 +31,20 @@ def morning_plan(cfg):
         return None
 
 
+def prepare_missing_plan(cfg, moment=None):
+    from .planning import load_plan, prepare_day
+    local = (moment or datetime.now(ZoneInfo(cfg.timezone))).astimezone(ZoneInfo(cfg.timezone))
+    if not cfg.daily_script_batch or local.strftime("%H:%M") < cfg.morning_plan_time or load_plan(cfg, local):
+        return None
+    remaining = [s for s in cfg.schedule_times.split(",") if s > local.strftime("%H:%M")]
+    if not remaining:
+        return None
+    try:
+        return prepare_day(cfg.model_copy(update={"schedule_times": ",".join(remaining)}), local)
+    except portalocker.exceptions.LockException:
+        return None
+
+
 def slot_key(cfg, moment):
     return moment.astimezone(ZoneInfo(cfg.timezone)).strftime("%Y-%m-%dT%H:%M")
 
