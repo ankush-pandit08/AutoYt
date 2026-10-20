@@ -71,20 +71,26 @@ def test_six_beats_and_source_names_are_not_spoken(cfg, script):
     assert result.source_urls == ["https://youtu.be/abc123DEF45"]
 
 
-def test_scene_word_budget_rejects_equal_length_hook(cfg, script):
+@pytest.mark.parametrize("reveal", [
+    "The new AI model processes camera input and answers spoken questions.",
+    "The newly announced AI model processes camera input alongside spoken questions, so users can ask about visible objects and receive explanations while using the device.",
+])
+def test_big_reveal_word_budget_is_advisory(cfg, script, reveal):
     source = youtube_content.SourceBrief(basis="youtube", topic="AI", videos=[{"url": "https://youtu.be/abc123DEF45"}])
     calls = []
-    def generate(*args):
-        if args[0] is ai.ScriptAudit:
+    def generate(schema, instruction, data):
+        if schema is ai.ScriptAudit:
             return ai.ScriptAudit(unsupported_sentences=[], misleading=False, defensive_only=True)
+        assert "These are guidance, not exact limits" in instruction
         value = shorts_draft(script)
+        value.narration[2] = reveal
         calls.append(True)
-        if len(calls) == 1:
-            value.narration[0] += " The explanation should be much shorter than this long introduction."
         return value
     topic = youtube_content.topics_from_items([item()], cfg)[0]
-    youtube_content.generate(cfg, SimpleNamespace(structured=generate), topic, source)
-    assert len(calls) == 2
+    result = youtube_content.generate(cfg, SimpleNamespace(structured=generate), topic, source)
+    assert len(calls) == 1
+    assert result.scenes[2].narration == reveal
+    assert result.scenes[2].target_seconds == 8
 
 
 def test_timed_speech_keeps_subtitle_timeline(cfg, script, tmp_path, monkeypatch):
