@@ -101,13 +101,15 @@ def test_supplied_narration_is_verbatim_and_audited(cfg, script, research_data, 
         if schema is ScriptAudit:
             return ScriptAudit(unsupported_sentences=["Unsupported"] if unsupported else [],
                                misleading=False, defensive_only=True)
-        assert data["provided_narration"] == script.script
-        return draft
+        assert " ".join(data["passages"]) == script.script
+        count = len(data["passages"])
+        return schema(title=draft.title,description=draft.description,thumbnail_text=draft.thumbnail_text,
+                      headlines=draft.headlines[:count],visual_queries=draft.visual_queries[:count])
 
     monkeypatch.setattr(ai, "validate_grounding", lambda *args: None)
     topic = Topic(title=script.topic, url=script.source_urls[0], source="test",
                   published_at=datetime.now(timezone.utc))
-    if changed or unsupported:
+    if unsupported:
         with pytest.raises(ValueError, match="rejected after two attempts"):
             ai.generate(cfg, SimpleNamespace(structured=structured), topic, research_data,
                         provided_narration=script.script)
@@ -188,10 +190,10 @@ def test_short_custom_script_reaches_audio_without_discovery(cfg, monkeypatch):
     text = "This model can explain visible objects and answer spoken questions about the environment around you."
     monkeypatch.setattr("autoyt.pipeline.discovery.discover", lambda *args: pytest.fail("Unexpected discovery"))
     def structured(schema, instruction, data):
-        assert schema is ai.NaturalEditorialDraft
-        assert data["provided_narration"] == text
+        assert schema.__name__ == "ProvidedNarrationMetadata"
+        assert " ".join(data["passages"]) == text
         return schema(title="A model explains visible objects", description="A short demonstration of contextual model capabilities.",
-            thumbnail_text="Explain visible objects", narration=[text], headlines=["Visible objects"],
+            thumbnail_text="Explain visible objects", headlines=["Visible objects"],
             visual_queries=["person using smart glasses"])
     runner = Pipeline(cfg)
     runner.llm = SimpleNamespace(structured=structured, release=lambda: None)
@@ -204,3 +206,24 @@ def test_short_custom_script_reaches_audio_without_discovery(cfg, monkeypatch):
     assert runner.store.get(job)["stage"] == 3
     assert len(seen) == 1 and seen[0].natural_pacing
     assert seen[0].script == text and len(seen[0].scenes) == 1
+
+
+
+@pytest.mark.parametrize("text", [
+    "This script has exactly my punctuation, numbers like 2026, and names such as ChatGPT. Keep every word unchanged!",
+    "This is a sentence without final punctuation but it still contains enough normal spoken words for the custom video",
+    " ".join(["Custom words and punctuation must stay unchanged."] * 18),
+])
+def test_metadata_model_cannot_rewrite_custom_narration(script,text):
+    from autoyt.models import Topic
+    def metadata(schema,instruction,data):
+        assert "narration" not in schema.model_fields
+        assert " ".join(data["passages"])==" ".join(text.split())
+        return schema(title=script.title,description=script.description,thumbnail_text=script.thumbnail_text,
+            headlines=["Custom narration"]*len(data["passages"]),
+            visual_queries=["technology on a desktop"]*len(data["passages"]))
+    topic=Topic(title="Custom narration",url="local:manual-script",source="user_input",published_at=None,content_kind="evergreen")
+    draft=ai.plan_narration(SimpleNamespace(structured=metadata),topic,text)
+    result=ai.writer_script(draft,topic,source_basis="user_input",source_urls=[],natural_pacing=True,preserve_narration=True)
+    assert result.script==" ".join(text.split())
+    assert all(len(scene.narration)<=500 for scene in result.scenes)

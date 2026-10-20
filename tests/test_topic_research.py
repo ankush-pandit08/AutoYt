@@ -38,7 +38,7 @@ def test_real_article_text_and_exact_quotes_are_required(cfg, research_data, mon
     monkeypatch.setattr(topic_research.research, 'extract', lambda url,*args,**kwargs: next(s for s in sources if s.url == url))
     monkeypatch.setattr(topic_research.research, 'official_links', lambda *args: [])
     monkeypatch.setattr(topic_research, 'select_article_claims', lambda *args,**kwargs: research_data.claims)
-    llm = SimpleNamespace(structured=lambda *args: ai.Audit(supported=True,reasons=[]))
+    llm = SimpleNamespace(structured=lambda schema,*args: topic_research.WebSourceReview(credible=True,reason='Technical source') if schema is topic_research.WebSourceReview else ai.Audit(supported=True,reasons=[]))
     result = topic_research.gather(cfg, SimpleNamespace(article=lambda url:'article'), llm, topic, tmp_path)
     assert result.claims == research_data.claims
     assert (tmp_path/'source_documents.json').is_file()
@@ -138,3 +138,65 @@ def test_non_cybersecurity_story_is_not_rejected_by_defensive_flag(cfg,script,re
             return ai.ScriptAudit(unsupported_sentences=[],misleading=False,defensive_only=False)
         return shorts_draft(script)
     assert youtube_content.generate(cfg,SimpleNamespace(structured=response),topic,supported_brief(topic,research_data))
+
+
+
+def test_official_page_does_not_need_a_second_article(research_data):
+    from autoyt import research
+    evidence = research_data.model_copy(deep=True)
+    evidence.sources = evidence.sources[:1]
+    for claim in evidence.claims:
+        claim.evidence = claim.evidence[:1]
+        claim.verification_status = "official_source"
+    assert topic_research.evidence_basis(evidence) == "official"
+    topic_research.verify_evidence(evidence)
+    with pytest.raises(ValueError, match="independent corroboration"):
+        research.verify_claims(evidence.claims,evidence.sources)
+    evidence.claims[0].evidence[0].quote = "An invented quotation that is absent from this official document."
+    with pytest.raises(ValueError, match="quotation absent"):
+        topic_research.verify_evidence(evidence)
+
+
+def test_single_nonofficial_web_page_is_not_independent_evidence(research_data):
+    source=research_data.sources[1].model_copy(update={"reviewed_web":True})
+    with pytest.raises(ValueError,match="official page"):
+        topic_research.validate_sources([source])
+
+
+def test_non_news_web_pages_are_discovered_and_screened(cfg,monkeypatch):
+    cfg.rss_feeds=[]
+    topic=youtube_content.topics_from_items([item()],cfg)[0]
+    rss='<rss><channel><item><link>https://technical-research.example/docs/model</link></item></channel></rss>'
+    llm=SimpleNamespace(structured=lambda *args:topic_research.SearchQuery(query="AI model documentation"))
+    _,urls=topic_research.source_urls(cfg,SimpleNamespace(get=lambda *args,**kwargs:rss),llm,topic)
+    assert urls==['https://technical-research.example/docs/model']
+
+
+def test_official_only_script_is_labelled_and_attributed(cfg,script,research_data):
+    from test_youtube_content import shorts_draft
+    evidence=research_data.model_copy(deep=True)
+    evidence.sources=evidence.sources[:1]
+    for claim in evidence.claims:
+        claim.evidence=claim.evidence[:1]
+        claim.verification_status="official_source"
+    topic=youtube_content.topics_from_items([item()],cfg)[0]
+    source=youtube_content.brief(topic).model_copy(update={"evidence":evidence,"fact_check_status":"official_source_only"})
+    def response(schema,instruction,data):
+        assert data["evidence_basis"]=="official"
+        if schema is ai.ScriptAudit:
+            assert "require attribution" in instruction
+            return schema(unsupported_sentences=[],misleading=False,defensive_only=True)
+        assert "explicitly attribute" in instruction
+        value=shorts_draft(script)
+        value.narration[0]="According to the company, this AI model sees moving objects."
+        return value
+    result=youtube_content.generate(cfg,SimpleNamespace(structured=response),topic,source)
+    assert result.source_basis=="official" and len(result.source_urls)==1
+    assert all(scene.claim_ids for scene in result.scenes)
+
+
+
+def test_shared_repository_host_is_not_sufficient_as_only_official_source(research_data):
+    source=research_data.sources[0].model_copy(update={"url":"https://github.com/random-user/rumors","publisher":"microsoft"})
+    with pytest.raises(ValueError,match="official page"):
+        topic_research.validate_sources([source])

@@ -1,4 +1,4 @@
-# Creator topics and supporting article research
+# Creator topics and internet research
 
 Preferred topic channels (verified on 20 October 2026):
 
@@ -10,9 +10,9 @@ Configured creators supply topic ideas only. Bounded public upload-playlist read
 
 ## Supporting evidence
 
-Before scripting, the app searches for related article links and retrieves real article text with the existing public-HTTPS, redirect and robots controls. Search snippets, creator titles and descriptions are never claim evidence. Source URLs, documents and retrieval diagnostics are retained with the research. Older documentation can explain a capability but cannot establish a new launch date.
+Before scripting, the app searches the web for relevant official product pages, documentation, research, technical analysis and reporting, then retrieves actual page text with the existing public-HTTPS, redirect and robots controls. Search snippets, creator titles and descriptions are never claim evidence. Source URLs, documents and retrieval diagnostics are retained with the research. Older documentation can explain a capability but cannot establish a new launch date.
 
-Official sources plus independent reporting are preferred. If official pages are inaccessible, two established independent reporting publishers must corroborate the selected core claims. Sponsored pages, syndicated press releases, copied article text and related publisher families do not count as independent corroboration. Quotes must be exact substrings of retrieved articles; numerical claims need support in each quotation. Preselected pairs from different publishers constrain the model's claim selection. A semantic source audit checks full meaning, uncertainty and context, and a separate script audit checks the resulting narration and on-screen text. These are evidence checks, not proof that a company's claimed performance has been independently demonstrated.
+Official sources plus independent corroboration are preferred. A relevant accessible official page can also support clearly attributed company statements on its own; these are labelled official-source-only, never independently confirmed. Other substantive web pages can support research after source-quality screening, with independent publishers required when no official information is available. Sponsored pages, syndicated press releases, copied article text and related publisher families do not count as independent corroboration. Quotes must be exact substrings of retrieved pages; numerical claims need support in each quotation. Preselected pairs from different publishers constrain the model's claim selection. A semantic source audit checks full meaning, uncertainty and context, and a separate script audit checks the resulting narration and on-screen text. These are evidence checks, not proof that a company's claimed performance has been independently demonstrated.
 
 Both morning plans and new manual runs use this research. An unsupported topic is skipped in favor of another eligible creator topic. Scripts from old metadata-only runs must be researched before regeneration. Creator names are excluded from narration and on-screen text; article source links remain in metadata and run details.
 
@@ -25,3 +25,7 @@ Voice audio is never time-stretched, slowed, sped up or padded to meet a 45-seco
 ## Run now and scheduler ownership
 
 Run now and Preview create fresh jobs, refresh creator discovery, and do not consume a saved daily script or resume old work. Interrupted pre-upload history is retained as failed when a fresh run replaces it. An unresolved upload must be reconciled through Retry first to prevent duplicate publication. Scheduled slots retain their separate prepared-plan and crash-recovery behavior. Published stories and corroborated facts are deduplicated. Source/API failures never silently switch voice or model providers. Existing upload schedules, voice preferences and video cleanup policy remain unchanged. Only the production server scheduler runs.
+
+## Custom scripts
+
+The script form displays a plain-paragraph example. Paste 12–180 spoken words and a short topic; no six-sentence, timestamp or scene-label format is required. Python splits the supplied text without changing words or punctuation (whitespace between passages may change). The model produces only metadata and visual queries, never replacement narration. Preview runs never upload.

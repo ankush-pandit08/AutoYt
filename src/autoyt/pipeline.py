@@ -43,7 +43,10 @@ class Pipeline:
                 script = Script.model_validate(prepared["script"])
                 if prepared.get("source_brief"):
                     source = youtube_content.SourceBrief.model_validate(prepared["source_brief"])
-                    if script.source_basis != ("verified" if source.evidence else source.basis) or (source.basis == "youtube" and (not source.videos or not source.evidence)):
+                    from .topic_research import evidence_basis, verify_evidence
+                    if source.evidence:
+                        verify_evidence(source.evidence)
+                    if script.source_basis != (evidence_basis(source.evidence) if source.evidence else source.basis) or (source.basis == "youtube" and (not source.videos or not source.evidence)):
                         raise ValueError("Prepared script does not match its saved source basis")
                 else:
                     evidence = Research.model_validate(prepared["research"])
@@ -240,8 +243,8 @@ class Pipeline:
                             db.update(job_id, STAGES[index], topic=candidate.title)
                             break
                         else:
-                            db.update(job_id, "SKIPPED", error="No creator topic had sufficient supporting articles. "
-                                      "See research attempts and try again when supporting coverage is available.")
+                            db.update(job_id, "SKIPPED", error="Web research could not establish usable facts for the available creator topics. "
+                                      "Official pages, documentation and credible web sources were checked; see research attempts.")
                             return job_id
                         self._save(job_id, folder, "source_brief", source)
                         if source.evidence:

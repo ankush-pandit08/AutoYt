@@ -238,7 +238,7 @@ class Dashboard:
                                              "script": e["script"]["script"]} for e in plan["entries"]]}
                                if plan else None),
                 "writing_warning": ("Creators supply topics only. Generated scripts require retrieved "
-                    "article evidence from distinct publishers. Sources are shown in run details; "
+                    "web evidence from documentation, official pages or credible reporting. Official-only claims are attributed; sources appear in run details. "
                     "popularity is not proof." if cfg.content_mode == "youtube_insights" else
                     "Trending sources guide topic selection. Engagement and virality are not guaranteed. "
                     "Failed evidence or quality checks stop publication.")}

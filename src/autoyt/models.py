@@ -32,6 +32,7 @@ class Source(BaseModel):
     retrieved_at: datetime
     text: str
     primary: bool
+    reviewed_web: bool = False
     publisher: str
 
 
@@ -43,8 +44,8 @@ class Evidence(BaseModel):
 class Claim(BaseModel):
     claim: str = Field(min_length=15, max_length=500)
     attribution: str | None = None
-    evidence: list[Evidence] = Field(min_length=2)
-    verification_status: Literal["verified"] = "verified"
+    evidence: list[Evidence] = Field(min_length=1)
+    verification_status: Literal["verified", "official_source"] = "verified"
 
 
 class Research(BaseModel):
@@ -72,7 +73,7 @@ class Script(BaseModel):
     thumbnail_text: str = Field(min_length=3, max_length=40)
     scenes: list[Scene] = Field(min_length=1, max_length=10)
     source_urls: list[str] = Field(default_factory=list)
-    source_basis: Literal["verified", "youtube", "user_input"] = "verified"
+    source_basis: Literal["verified", "official", "youtube", "user_input"] = "verified"
     needs_synthetic_media_disclosure: bool = False
 
     @model_validator(mode="after")
@@ -80,9 +81,11 @@ class Script(BaseModel):
         if self.source_basis == "verified" and (len(self.source_urls) < 2 or any(
                 not scene.claim_ids for scene in self.scenes)):
             raise ValueError("Verified scripts need two source URLs and evidence references in each scene")
+        if self.source_basis == "official" and (not self.source_urls or any(not scene.claim_ids for scene in self.scenes)):
+            raise ValueError("Official-source scripts need source URLs and evidence references")
         if self.source_basis == "youtube" and not self.source_urls:
             raise ValueError("YouTube scripts need a source video URL")
-        if self.source_basis != "verified" and any(scene.claim_ids for scene in self.scenes):
+        if self.source_basis not in {"verified", "official"} and any(scene.claim_ids for scene in self.scenes):
             raise ValueError("Unchecked scripts cannot claim verified evidence references")
         joined = " ".join(x.narration.strip() for x in self.scenes)
         if " ".join(self.script.split()) != " ".join(joined.split()):

@@ -215,7 +215,12 @@ def test_own_script_needs_no_discovery_or_two_source_gate(cfg, script, monkeypat
     request = ManualRequest(mode="script", topic=script.topic, content=script.script)
     topic = find_candidates(cfg, None, None, request)[0]
     source = youtube_content.brief(topic)
-    llm = SimpleNamespace(structured=lambda *args: draft(script))
+    def metadata(schema, instruction, data):
+        count = len(data["passages"])
+        return schema(title=script.title, description=script.description, thumbnail_text=script.thumbnail_text,
+                      headlines=[s.headline for s in script.scenes[:count]],
+                      visual_queries=[s.visual_query for s in script.scenes[:count]])
+    llm = SimpleNamespace(structured=metadata)
     result = youtube_content.generate(cfg, llm, topic, source, provided_narration=request.content)
     assert result.script == script.script and result.source_basis == "user_input"
     assert result.source_urls == [] and source.fact_check_status == "not_checked"

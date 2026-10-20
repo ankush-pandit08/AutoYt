@@ -327,11 +327,12 @@ def select_claims(llm, sources, folder=None, topic=None, *, include_primary=Fals
     raise ValueError("Claim selection failed exact evidence checks after two attempts")
 
 
-def verify_claims(claims, sources, *, require_primary=True, minimum_overlap=.65):
+def verify_claims(claims, sources, *, require_primary=True, minimum_overlap=.65, allow_primary_only=False):
     lookup = {s.url: s for s in sources}
     for claim in claims:
         families = set()
         has_primary = False
+        only_primary = True
         for evidence in claim.evidence:
             source = lookup.get(evidence.source_url)
             if source is None:
@@ -347,7 +348,9 @@ def verify_claims(claims, sources, *, require_primary=True, minimum_overlap=.65)
                     raise ValueError("Numeric claim lacks independent support")
             families.add(source.publisher)
             has_primary |= source.primary
-        if len(families) < 2 or (require_primary and not has_primary):
+            only_primary &= source.primary
+        primary_exception = allow_primary_only and has_primary and only_primary
+        if (len(families) < 2 and not primary_exception) or (require_primary and not has_primary):
             raise ValueError("Each claim needs primary and independent corroboration")
 
 

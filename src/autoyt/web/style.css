@@ -736,3 +736,5 @@ dialog{
 }
 
 .voice-card{margin-top:24px}.voice-form{padding:0 24px 24px}.voice-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.voice-fields>div{display:grid;gap:8px;min-width:0}.voice-fields label{font-size:12px;font-weight:600}.voice-fields select,.voice-fields input{width:100%;min-width:0;min-height:44px;padding:10px;border:1px solid #d6dde5;border-radius:10px;background:#fff;color:#182536;font:inherit;font-size:13px}.voice-fields small,.voice-message,.voice-notice{font-size:12px;line-height:1.7;overflow-wrap:anywhere}.voice-notice{padding:12px;background:#fff7e5;border-radius:10px;color:#77520b}.voice-message{min-height:20px}.voice-form audio{width:100%;margin-top:18px}.voice-form .schedule-help{margin-top:14px}.voice-form :focus-visible{outline:2px solid #4780ff;outline-offset:2px}@media(max-width:700px){.voice-fields{grid-template-columns:1fr}.voice-form{padding:0 16px 16px}}
+
+.custom-script-format{margin:12px 0;padding:14px;border:1px solid #d6dde5;border-radius:10px;background:#f6f8fb;font-size:12px;line-height:1.7}.custom-script-format p{margin:7px 0 0}.custom-script-format[hidden]{display:none}
