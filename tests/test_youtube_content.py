@@ -21,6 +21,19 @@ def draft(script):
         headlines=[s.headline for s in script.scenes], visual_queries=[s.visual_query for s in script.scenes])
 
 
+def shorts_draft(script):
+    value = draft(script)
+    value.narration = [
+        "This AI model sees moving objects.",
+        "That could change what you ask a wearable device to explain.",
+        "The new model processes camera input and spoken questions together, according to the supplied product announcement.",
+        "For example, you could point the camera at an unfamiliar device and ask about its controls, instead of typing a detailed description into a separate application first.",
+        "That offers a simpler way to get context, but the announcement does not establish accuracy in every environment or situation.",
+        "Would you trust this feature for everyday questions around you?",
+    ]
+    return value
+
+
 def unchecked_script(script, topic):
     return ai.writer_script(draft(script), topic, source_basis="youtube", source_urls=[topic.url])
 
@@ -67,17 +80,19 @@ def test_discovery_rejects_old_nontech_and_own_channel_videos(cfg):
     assert len(topics) == 1 and topics[0].url.endswith("abc123DEF45")
 
 
-def test_writer_creates_original_script_without_any_fact_audit(cfg, script):
+def test_writer_creates_original_script_with_metadata_consistency_check(cfg, script):
     cfg.content_mode = "youtube_insights"
     topic = youtube_content.topics_from_items([item()], cfg)[0]
     calls = []
 
     def structured(schema, instruction, data):
-        assert schema is ai.EditorialDraft  # No claim selection or source/script audit request.
+        if schema is ai.ScriptAudit:
+            return ai.ScriptAudit(unsupported_sentences=[], misleading=False, defensive_only=True)
+        assert schema is ai.EditorialDraft  # No independent research or claim-selection request.
         assert "ORIGINAL" in instruction and "not independently verified" in instruction
         assert data["source_brief"]["fact_check_status"] == "not_checked"
         calls.append(schema)
-        return draft(script)
+        return shorts_draft(script)
 
     result = youtube_content.generate(cfg, SimpleNamespace(structured=structured), topic,
                                       youtube_content.brief(topic))
@@ -94,13 +109,15 @@ def test_overlong_original_draft_is_supplied_for_bounded_shortening(cfg, script)
     calls = []
 
     def structured(schema, instruction, data):
+        if schema is ai.ScriptAudit:
+            return ai.ScriptAudit(unsupported_sentences=[], misleading=False, defensive_only=True)
         calls.append(data)
         if len(calls) == 1:
             return long
         assert data["previous_draft"] == long.model_dump()
         assert "Narration has" in data["previous_problem"]
         assert "SHORTEN" in data["revision_instruction"]
-        return draft(script)
+        return shorts_draft(script)
 
     result = youtube_content.generate(cfg, SimpleNamespace(structured=structured), topic,
                                       youtube_content.brief(topic))
@@ -114,6 +131,8 @@ def test_short_original_draft_is_expanded_instead_of_shortened(cfg, script):
     calls = []
 
     def structured(schema, instruction, data):
+        if schema is ai.ScriptAudit:
+            return ai.ScriptAudit(unsupported_sentences=[], misleading=False, defensive_only=True)
         calls.append(data)
         if len(calls) == 1:
             return short
@@ -122,7 +141,7 @@ def test_short_original_draft_is_expanded_instead_of_shortened(cfg, script):
         assert "EXPAND" in data["revision_instruction"]
         assert "Do not invent facts" in data["revision_instruction"]
         assert "When previous_draft is supplied, SHORTEN" not in instruction
-        return draft(script)
+        return shorts_draft(script)
 
     result = youtube_content.generate(cfg, SimpleNamespace(structured=structured), topic,
                                       youtube_content.brief(topic))

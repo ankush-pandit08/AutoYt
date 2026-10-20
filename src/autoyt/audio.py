@@ -114,6 +114,19 @@ class Speech:
                 audio = audio.mean(axis=1)
             if arrays and rate != arrays[0][1]:
                 raise ValueError("TTS segment sample rates differ")
+            if scene.target_seconds is not None:
+                target = scene.target_seconds
+                measured = len(audio) / rate
+                speed = max(.5, measured / target)
+                if speed > 1.5 or target - measured/speed > 1.5:
+                    raise ValueError(f"Scene {index+1} measured {measured:.1f}s for a {target:g}s beat; "
+                                     "revise its narration length to fit the Shorts template")
+                fitted = folder / f"voice-{index:02d}-timed.wav"
+                # Preserve pitch and leave a small safety margin before the next beat.
+                run([self.cfg.ffmpeg, "-y", "-v", "error", "-i", path, "-af",
+                     f"atempo={speed*1.01:.8f},apad,atrim=duration={target:.6f}", "-ar", str(rate), fitted])
+                check_audio(fitted)
+                audio, rate = sf.read(fitted, dtype="float32")
             duration = len(audio) / rate
             segments.append({"segment_id": index, "text": scene.narration,
                              "start": offset, "end": offset+duration})

@@ -53,6 +53,7 @@ class Research(BaseModel):
 
 
 class Scene(BaseModel):
+    target_seconds: float | None = Field(default=None, gt=0, le=45)
     narration: str = Field(min_length=10, max_length=500)
     visual_query: str = Field(min_length=3, max_length=100)
     headline: str = Field(min_length=3, max_length=65)
