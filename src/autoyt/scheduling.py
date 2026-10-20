@@ -1,3 +1,4 @@
+from pathlib import Path
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -9,6 +10,8 @@ from .pipeline import Pipeline
 
 
 def configure(scheduler, cfg):
+    if Path(".server-managed").is_file():
+        raise RuntimeError("LoopYt runs on the OmniKit server. This Windows scheduler is disabled.")
     if cfg.daily_script_batch:
         hour, minute = map(int, cfg.morning_plan_time.split(":"))
         scheduler.add_job(morning_plan, CronTrigger(hour=hour, minute=minute, timezone=cfg.timezone),

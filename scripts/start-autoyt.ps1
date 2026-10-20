@@ -1,6 +1,7 @@
 param([switch]$NoBrowser, [switch]$Supervise)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
+if (Test-Path -LiteralPath (Join-Path $root '.server-managed')) { throw 'LoopYt is hosted on OmniKit. Windows startup is disabled.' }
 $python = Join-Path $root '.venv/Scripts/python.exe'
 if (-not (Test-Path -LiteralPath $python)) { throw 'Run scripts/install.ps1 first.' }
 $ready = $false

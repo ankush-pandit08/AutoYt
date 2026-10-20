@@ -22,3 +22,5 @@ assets/footage/manifest.json
 *.bin
 client_secret*.json
 youtube_token*.json
+
+.server-managed
