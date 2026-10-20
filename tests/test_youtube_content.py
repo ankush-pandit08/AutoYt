@@ -240,3 +240,32 @@ def test_old_saved_script_cannot_restart_fact_audits_in_youtube_mode(cfg, monkey
     monkeypatch.setattr(ai, "generate", lambda *args: pytest.fail("Fact-checked generation must not run"))
     with pytest.raises(ValueError, match="previous verified-news workflow"):
         runner._generate_script(job)
+
+
+@pytest.mark.parametrize("fresh,expected", [(False,"SKIPPED"),(True,"FAILED")])
+def test_manual_run_rechecks_research_cooldown_but_automatic_runs_wait(cfg, monkeypatch, fresh, expected):
+    cfg.content_mode = "youtube_insights"
+    topic = youtube_content.topics_from_items([item()], cfg)[0]
+    monkeypatch.setattr(discovery, "discover", lambda *args: [topic])
+    monkeypatch.setattr(youtube_content, "discover", lambda *args, **kwargs: [topic])
+    runner = Pipeline(cfg)
+    old = runner.store.create()
+    runner.store.update(old,"SKIPPED")
+    runner.store.save(old,"research_attempts",[{"topic":topic.title,"reason":"Source temporarily unavailable"}])
+    monkeypatch.setattr(youtube_content,"research_brief",lambda *args: (_ for _ in ()).throw(RuntimeError("TRANSIENT: Research reached")))
+    job = runner.create_run(fresh=fresh)
+    assert runner.store.get(job)["state"] == expected
+    assert (runner.store.load(job,"topic") is not None) == fresh
+
+
+def test_fresh_run_still_excludes_published_creator_topics(cfg, monkeypatch):
+    cfg.content_mode = "youtube_insights"
+    topic = youtube_content.topics_from_items([item()], cfg)[0]
+    runner = Pipeline(cfg)
+    old = runner.store.create()
+    runner.store.reserve_topic(old,topic.title,discovery.fingerprint(topic.title))
+    runner.store.update(old,"PUBLISHED")
+    monkeypatch.setattr(youtube_content,"discover",lambda *args,**kwargs:[topic])
+    job = runner.create_run(fresh=True)
+    assert runner.store.get(job)["state"] == "SKIPPED"
+    assert "last seven days" in runner.store.get(job)["error"]

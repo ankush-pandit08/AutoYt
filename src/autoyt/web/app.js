@@ -136,16 +136,16 @@ function updateCustomInput() {
   content.rows = script ? 6 : 3;
   $('customLabel').textContent = script ? 'Paste your narration' : 'What should this video be about?';
   const languageHelp = state?.settings.language === 'en' ? 'English narration only.' : 'Hindi words in Devanagari, English tech words as normal.';
-  $('customHelp').textContent = script ? `60–115 words, at least six complete sentences. ${languageHelp} Your words stay unchanged.${youtubeMode() ? ' Independent fact checking is off.' : ' Unsupported facts stop the run.'}` : youtubeMode() ? `Creator videos identify the topic. Supporting articles ground the original ${narrationName()} script; unsupported stories are skipped.` : `We research only this topic and write an engaging ${narrationName()} script. If it cannot be verified, the run stops.`;
+  $('customHelp').textContent = script ? `12–180 words. One to six scenes, at normal speaking speed. ${languageHelp} Your words stay unchanged.${youtubeMode() ? ' Independent fact checking is off.' : ' Unsupported facts stop the run.'}` : youtubeMode() ? `Creator videos identify the topic. Supporting articles ground the original ${narrationName()} script; unsupported stories are skipped.` : `We research only this topic and write an engaging ${narrationName()} script. If it cannot be verified, the run stops.`;
   $('customSourceLabel').textContent = youtubeMode() ? 'YouTube video links' : 'Official article or documentation + independent coverage';
   $('customSourceHelp').textContent = youtubeMode() ? 'Topic mode: up to six YouTube video links, one per line. Script mode uses your narration directly.' : 'One HTTPS link per line, up to six. Useful when your topic is not in the news feeds. Source-based videos are treated as explainers.';
-  $('customCount').textContent = script ? `${content.value.trim().split(/\s+/).filter(Boolean).length} / 60–115 words` : `${content.value.length} / 180 characters`;
+  $('customCount').textContent = script ? `${content.value.trim().split(/\s+/).filter(Boolean).length} / 12–180 words` : `${content.value.length} / 180 characters`;
 }
 function customRun(preview) {
   if(!state || state.busy || !$('customForm').reportValidity()) return;
   const input = {mode:$('customMode').value, content:$('customContent').value.trim(), topic:$('customTopic').value.trim(), source_urls:$('customSources').value.split(/\n/).map(s=>s.trim()).filter(Boolean)};
   const count = input.content.split(/\s+/).length;
-  if(input.mode === 'script' && (count < 60 || count > 115)) return toast('Use 60–115 words for your script.');
+  if(input.mode === 'script' && (count < 12 || count > 180)) return toast('Use 12–180 words for your script.');
   if(input.source_urls.length > 6) return toast('Add up to six source links.');
   confirmAction(preview ? 'preview' : 'run', undefined, input);
 }

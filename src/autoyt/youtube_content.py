@@ -133,13 +133,21 @@ def followed_creator_items(client, channel_ids):
         playlist = channel.get("contentDetails", {}).get("relatedPlaylists", {}).get("uploads")
         if not playlist:
             continue
-        try:
-            page = client.playlistItems().list(part="contentDetails", playlistId=playlist, maxResults=20).execute()
-        except HttpError as error:
-            if error.resp.status in (403, 404):
-                continue  # An unavailable creator must not hide the other configured channels.
-            raise
-        video_ids.extend(item.get("contentDetails", {}).get("videoId") for item in page.get("items", []))
+        token = None
+        for _ in range(2):  # Bound quota use while covering busy creators' recent uploads.
+            options = {"part": "contentDetails", "playlistId": playlist, "maxResults": 50}
+            if token:
+                options["pageToken"] = token
+            try:
+                page = client.playlistItems().list(**options).execute()
+            except HttpError as error:
+                if error.resp.status in (403, 404):
+                    break  # An unavailable creator must not hide the other channels.
+                raise
+            video_ids.extend(item.get("contentDetails", {}).get("videoId") for item in page.get("items", []))
+            token = page.get("nextPageToken")
+            if not token:
+                break
     video_ids = list(dict.fromkeys(v for v in video_ids if isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9_-]{11}", v)))
     items = []
     for start in range(0, len(video_ids), 50):
@@ -151,7 +159,7 @@ def followed_creator_items(client, channel_ids):
 def discover(cfg, *, refresh=False):
     from googleapiclient.errors import HttpError
 
-    identity = hashlib.sha256(json.dumps(["v7-product-shorts", cfg.youtube_discovery_region, cfg.youtube_channel_id,
+    identity = hashlib.sha256(json.dumps(["v8-seven-day-creator-pages", cfg.youtube_discovery_region, cfg.youtube_channel_id,
         sorted(cfg.creator_channel_ids), cfg.topic_focus, cfg.prefer_tech_insights]).encode()).hexdigest()[:16]
     path = cfg.cache_dir / f"youtube-discovery-{identity}.json"
     if path.is_file() and not refresh:

@@ -1,5 +1,4 @@
 """Explicit local topic/script requests, kept separate from automatic story selection."""
-import re
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -25,10 +24,8 @@ class ManualRequest(BaseModel):
         else:
             if len(self.topic) < 3:
                 raise ValueError("Add a short topic for your script so its facts can be researched")
-            if not 60 <= len(self.content.split()) <= 115:
-                raise ValueError("Your script must contain 60–115 words for a Short")
-            if len(re.findall(r"[.!?।॥](?:\s|$)", self.content)) < 6:
-                raise ValueError("Use at least six complete sentences so your script can form six scenes")
+            if not 12 <= len(self.content.split()) <= 180:
+                raise ValueError("Your script must contain 12–180 words for a Short")
         for url in self.source_urls:
             parts = urlsplit(url)
             if (len(url) > 2048 or parts.scheme != "https" or not parts.hostname

@@ -179,7 +179,10 @@ class Pipeline:
                                       and (db.load(job_id, "request") or {}).get("fresh") else
                                       discovery.discover(cfg, self.web))
                         previous = db.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
-                        previous += db.recent_research_rejections()
+                        # A deliberate manual run may recheck failed evidence immediately.
+                        # Automatic runs retain the cooldown; published topics stay blocked.
+                        if not (db.load(job_id, "request") or {}).get("fresh") and not request:
+                            previous += db.recent_research_rejections()
                         candidates = [t for t in candidates if not discovery.duplicate(t.title, previous)]
                         if not request and (cfg.prefer_tech_insights or cfg.topic_focus == "ai_coding"):
                             candidates = discovery.rank_insights(candidates, db.recent_topics(
@@ -191,8 +194,9 @@ class Pipeline:
                             db.update(job_id, "SKIPPED", error=(
                                 "No recent, nonduplicate YouTube technology video matched your topic. "
                                 "Add a YouTube video link or choose a different topic." if request else
-                                "No recent, nonduplicate YouTube technology topics available. "
-                                "Try again later; Google Trends and RSS fallbacks are disabled."))
+                                "No unused technology topics from your selected creators in the last seven days. "
+                                "Published stories are excluded; automatic runs also rest failed research for six hours. "
+                                "Use your own script or try a different creator video link. Google Trends and RSS fallbacks are disabled."))
                             return job_id
                         if request:
                             db.update(job_id, "SKIPPED", error="No verified candidate for your chosen topic. "

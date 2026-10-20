@@ -168,3 +168,39 @@ def test_http_accepts_script_payload_and_keeps_original_input(cfg, script, monke
         server.server_close()
         thread.join()
         app.close()
+
+
+@pytest.mark.parametrize("count", [12, 35, 125, 180])
+def test_custom_script_accepts_flexible_length_without_six_sentences(count):
+    text = " ".join(["technology"] * count) + "."
+    request = ManualRequest(mode="script", topic="Technology explanation", content=text)
+    assert request.content == text
+
+
+@pytest.mark.parametrize("count", [11, 181])
+def test_custom_script_rejects_out_of_range_length(count):
+    with pytest.raises(ValidationError, match="12"):
+        ManualRequest(mode="script", topic="Technology", content=" ".join(["word"] * count))
+
+
+def test_short_custom_script_reaches_audio_without_discovery(cfg, monkeypatch):
+    cfg.content_mode = "youtube_insights"
+    text = "This model can explain visible objects and answer spoken questions about the environment around you."
+    monkeypatch.setattr("autoyt.pipeline.discovery.discover", lambda *args: pytest.fail("Unexpected discovery"))
+    def structured(schema, instruction, data):
+        assert schema is ai.NaturalEditorialDraft
+        assert data["provided_narration"] == text
+        return schema(title="A model explains visible objects", description="A short demonstration of contextual model capabilities.",
+            thumbnail_text="Explain visible objects", narration=[text], headlines=["Visible objects"],
+            visual_queries=["person using smart glasses"])
+    runner = Pipeline(cfg)
+    runner.llm = SimpleNamespace(structured=structured, release=lambda: None)
+    seen = []
+    def audio(self, script, folder):
+        seen.append(script)
+        raise ValueError("Stopped at audio for isolated test")
+    monkeypatch.setattr("autoyt.pipeline.audio.Speech.synthesize", audio)
+    job = runner.create_run(dry_run=True, fresh=True, manual_input={"mode":"script", "topic":"Model capabilities", "content":text})
+    assert runner.store.get(job)["stage"] == 3
+    assert len(seen) == 1 and seen[0].natural_pacing
+    assert seen[0].script == text and len(seen[0].scenes) == 1
