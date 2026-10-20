@@ -48,24 +48,63 @@ def topics_from_items(items, cfg, *, signal="recent_popular", now=None):
                 title_words & {"ai", "robot", "robots", "robotic", "robotics"}):
             continue
         tech_words = TECH | {"tech", "airpods", "headset", "earbuds", "phone", "phones", "tablet",
-                             "tablets", "coding", "programming", "llm", "llms"}
+                             "tablets", "coding", "programming", "llm", "llms", "gpt", "claude", "gemini",
+                             "openai", "anthropic", "deepseek", "qwen", "llama", "agentic"}
         if not words(title + " " + description[:300] + " " + " ".join(snippet.get("tags", []))) & tech_words:
             continue
         url = "https://www.youtube.com/watch?v=" + video_id
         metadata = {"url": url, "video_id": video_id, "title": title,
                     "description": description, "channel": snippet.get("channelTitle", ""),
+                    "channel_id": snippet.get("channelId", ""),
                     "published_at": date.isoformat(), "views": views, "signal": signal}
         velocity = views / max(1, age / 3600)
         score = .65 * min(1, math.log10(velocity + 1) / 6) + .35 * (1 - age / MAX_STORY_AGE_SECONDS)
+        references = []
+        if snippet.get("channelId") in cfg.creator_channel_ids:
+            metadata["signal"] = "followed_creator"
+            score = min(1, score + .20)
+            references = [{"title": title, "url": url, "source": "https://www.youtube.com/channel/" + snippet["channelId"]}]
+        if cfg.topic_focus == "ai_coding" and words(title + " " + description[:300]) & {
+                "ai", "llm", "llms", "gpt", "chatgpt", "claude", "gemini", "openai", "anthropic",
+                "deepseek", "qwen", "llama", "agentic", "agents", "coding", "models", "artificial"}:
+            score = min(1, score + .15)
         topics.append(Topic(title=title, url=url, published_at=date, source="youtube",
-                            volume=views, youtube_metadata=metadata, score=score))
+                            volume=views, youtube_metadata=metadata, score=score, creator_references=references))
     return sorted(topics, key=lambda t: t.score, reverse=True)
+
+
+def followed_creator_items(client, channel_ids):
+    """Read recent public uploads directly; no subscription changes or search-quota cost."""
+    from googleapiclient.errors import HttpError
+    ids = list(dict.fromkeys(channel_ids))[:20]
+    if not ids:
+        return []
+    channels = client.channels().list(part="contentDetails", id=",".join(ids), maxResults=50).execute()
+    video_ids = []
+    for channel in channels.get("items", []):
+        playlist = channel.get("contentDetails", {}).get("relatedPlaylists", {}).get("uploads")
+        if not playlist:
+            continue
+        try:
+            page = client.playlistItems().list(part="contentDetails", playlistId=playlist, maxResults=20).execute()
+        except HttpError as error:
+            if error.resp.status in (403, 404):
+                continue  # An unavailable creator must not hide the other configured channels.
+            raise
+        video_ids.extend(item.get("contentDetails", {}).get("videoId") for item in page.get("items", []))
+    video_ids = list(dict.fromkeys(v for v in video_ids if isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9_-]{11}", v)))
+    items = []
+    for start in range(0, len(video_ids), 50):
+        page = client.videos().list(part="snippet,statistics", id=",".join(video_ids[start:start+50]), maxResults=50).execute()
+        items.extend(page.get("items", []))
+    return items
 
 
 def discover(cfg):
     from googleapiclient.errors import HttpError
 
-    identity = hashlib.sha256(("v2" + cfg.youtube_discovery_region + cfg.youtube_channel_id).encode()).hexdigest()[:16]
+    identity = hashlib.sha256(json.dumps(["v3", cfg.youtube_discovery_region, cfg.youtube_channel_id,
+        sorted(cfg.creator_channel_ids), cfg.topic_focus, cfg.prefer_tech_insights]).encode()).hexdigest()[:16]
     path = cfg.cache_dir / f"youtube-discovery-{identity}.json"
     if path.is_file():
         try:
@@ -79,6 +118,7 @@ def discover(cfg):
             pass
     client, _ = youtube.service(cfg)
     try:
+        creator_items = followed_creator_items(client, cfg.creator_channel_ids)
         try:
             items = client.videos().list(part="snippet,statistics", chart="mostPopular",
                 regionCode=cfg.youtube_discovery_region, videoCategoryId="28", maxResults=50).execute()
@@ -87,10 +127,12 @@ def discover(cfg):
             if error.resp.status not in (400, 404):
                 raise
             topics = []
-        if len(topics) < 10:
+        topics += topics_from_items(creator_items, cfg, signal="followed_creator")
+        if len({t.url for t in topics}) < 10:
             since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat().replace("+00:00", "Z")
             results = client.search().list(part="snippet", type="video", videoCategoryId="28",
-                q="technology|AI|smartphone|software|gadgets", order="viewCount", publishedAfter=since,
+                q=("AI|LLM|AI models|coding agents|artificial intelligence" if cfg.topic_focus == "ai_coding"
+                   else "technology|AI|smartphone|software|gadgets"), order="viewCount", publishedAfter=since,
                 regionCode=cfg.youtube_discovery_region, relevanceLanguage="en", safeSearch="moderate",
                 maxResults=50).execute()
             ids = [item.get("id", {}).get("videoId") for item in results.get("items", [])]
