@@ -44,6 +44,9 @@ def doctor(cfg):
                  and cfg.indicf5_reference_audio.is_file() and cfg.indicf5_reference_text_file.is_file())
         checks["tts"] = "IndicF5 local CPU configured; run doctor --tts-test" if ready else "MISSING: see IndicF5 in SETUP.md"
         checks["voice"] = cfg.tts_voice + " / IndicF5 Hinglish"
+    elif cfg.tts_engine == "elevenlabs":
+        checks["elevenlabs_api_key"] = bool(cfg.elevenlabs_api_key.strip())
+        checks["voice"] = cfg.tts_voice + " / eleven_flash_v2_5"
     elif cfg.tts_engine == "gemini":
         checks["tts"] = "Gemini speech key configured; run doctor --tts-test" if cfg.gemini_api_key else "REQUIRED: GEMINI_API_KEY"
         checks["voice"] = cfg.tts_voice + " / " + cfg.gemini_tts_model
@@ -108,7 +111,8 @@ def main(argv=None):
         sub.add_parser(name).add_argument("job_id")
     args = parser.parse_args(argv)
     try:
-        cfg = Settings()
+        from .voice_settings import apply
+        cfg = apply(Settings())
         cfg.prepare()
         handler = RotatingFileHandler("data/logs/autoyt.log", maxBytes=2_000_000, backupCount=3, encoding="utf-8")
         logging.basicConfig(level=logging.INFO, handlers=[logging.StreamHandler(), handler],

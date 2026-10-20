@@ -23,6 +23,8 @@ def load_plan(cfg, moment=None):
 
 
 def prepare_day(cfg, moment=None):
+    from .voice_settings import apply
+    cfg = apply(cfg)
     cfg.prepare()
     with pipeline_lock(cfg):
         path = plan_path(cfg, moment)

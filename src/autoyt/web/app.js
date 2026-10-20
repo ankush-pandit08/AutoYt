@@ -4,6 +4,7 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;',
 const labels = ['Find topic','Verify facts','Write script','Voiceover','Find visuals','Edit & captions','Quality check','Upload'];
 const terminal = new Set(['PUBLISHED','AWAITING_REVIEW','FAILED','SKIPPED','READY_TO_UPLOAD']);
 let state, token, pending, refreshing = false;
+let voiceInitialized = false, voiceVersion, voicePage = null, voiceLoading = false, voiceTestingId = null, voiceSaving = false;
 const time = value => value ? new Date(value).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',timeZone:state?.settings.timezone || 'Asia/Kolkata'}) : '—';
 const date = value => new Date(value).toLocaleDateString('en-IN',{day:'numeric',month:'short',timeZone:state?.settings.timezone || 'Asia/Kolkata'});
 const nice = value => String(value).replaceAll('_',' ').toLowerCase().replace(/^./, c => c.toUpperCase());
@@ -34,6 +35,7 @@ function renderJobs() {
 }
 function render() {
   const s = state, cfg = s.settings;
+  renderVoiceSettings();
   $('connection').textContent = 'Connected to localhost';
   $('offline').hidden = true;
   $('autoBadge').textContent = s.auto_enabled ? 'ON' : 'PAUSED';
@@ -151,5 +153,76 @@ $('customMode').addEventListener('change', updateCustomInput);
 $('customContent').addEventListener('input', updateCustomInput);
 $('customForm').addEventListener('submit', e=>{e.preventDefault();customRun(false);});
 $('customPreview').onclick=()=>customRun(true);
+function voiceSelection() {
+  return {provider:$('voiceProvider').value, language:$('scriptLanguage').value,
+    voice:$('voiceProvider').value === 'elevenlabs' ? $('elevenVoice').value : $('localVoice').value.trim()};
+}
+function clearVoiceSample() {
+  if(voiceTestingId || !$('voiceAudio').hidden) {
+    voiceTestingId=null; $('voiceAudio').pause(); $('voiceAudio').hidden=true;
+    $('voiceMessage').textContent='Selection changed. Test again to preview this voice and language.';
+  }
+}
+function voiceProviderChanged() {
+  clearVoiceSample();
+  const eleven = $('voiceProvider').value === 'elevenlabs';
+  $('elevenVoiceRow').hidden = !eleven; $('localVoiceRow').hidden = eleven; $('elevenNotice').hidden = !eleven;
+  $('localVoice').required = !eleven; $('elevenVoice').required = eleven;
+  if(!eleven) $('localVoice').value = state.voice_settings.voices[$('voiceProvider').value] || ($('voiceProvider').value === 'gemini' ? 'Puck' : $('voiceProvider').value === 'kokoro' ? 'am_michael' : 'default');
+  if(eleven) loadVoiceList(false);
+}
+async function voiceRequest(action, extra={}) {
+  return api('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-AutoYT-Token':token},body:JSON.stringify({action,...extra})});
+}
+async function loadVoiceList(more=false) {
+  if(voiceLoading || !token) return;
+  voiceLoading = true; $('loadVoices').disabled = $('moreVoices').disabled = true;
+  try {
+    const result = await voiceRequest('voice_list', {page:more ? voicePage : null});
+    const saved = $('elevenVoice').value || state.voice_settings.voices.elevenlabs || '';
+    const existing = more ? [...$('elevenVoice').options].filter(o=>o.value).map(o=>({id:o.value,name:o.textContent})) : [];
+    const voices = new Map([...existing,...result.voices].map(v=>[v.id,v]));
+    $('elevenVoice').innerHTML = '<option value="">Choose a voice</option>' + [...voices.values()].map(v=>`<option value="${esc(v.id)}">${esc(v.name)}${v.labels ? ' · '+esc([v.labels.accent,v.labels.gender,v.labels.language].filter(Boolean).join(' / ')) : ''}${v.recommended ? ' (Indian male)' : ''}</option>`).join('');
+    if(saved && !voices.has(saved)) $('elevenVoice').add(new Option('Saved voice (not on this page)', saved));
+    $('elevenVoice').value = saved; voicePage = result.next_page; $('moreVoices').hidden = !voicePage;
+    $('voiceMessage').textContent = result.voices.length ? 'Voices loaded from ElevenLabs. Choose a voice and test it.' : 'No voices available. Check your ElevenLabs voice library.';
+  } catch(error) { $('voiceMessage').textContent = error.message; }
+  finally { voiceLoading = false; $('loadVoices').disabled = $('moreVoices').disabled = false; }
+}
+function renderVoiceSettings() {
+  if(!state.voice_settings) return;
+  if(!voiceInitialized) {
+    const value=state.voice_settings.selection; voiceVersion=state.voice_settings.version;
+    $('voiceProvider').value=value.provider; $('scriptLanguage').value=value.language; $('localVoice').value=value.voice;
+    if(value.provider === 'elevenlabs') { $('elevenVoice').add(new Option('Saved voice',value.voice)); $('elevenVoice').value=value.voice; }
+    voiceInitialized=true; voiceProviderChanged();
+  }
+  $('saveVoice').disabled = !token || voiceSaving;
+  $('testVoice').disabled = !token || state.busy;
+  const result=state.voice_preview;
+  if(result && result.id === voiceTestingId) {
+    if(result.state === 'READY') { $('voiceAudio').src='/api/voice-preview/'+result.id+'.wav'; $('voiceAudio').hidden=false; $('voiceMessage').textContent='Sample ready. Press play to listen before saving.'; voiceTestingId=null; }
+    else if(result.state === 'FAILED') { $('voiceMessage').textContent=result.error; voiceTestingId=null; }
+  }
+}
+$('voiceProvider').onchange=voiceProviderChanged;
+$('scriptLanguage').onchange=clearVoiceSample;
+$('localVoice').oninput=clearVoiceSample;
+$('elevenVoice').onchange=clearVoiceSample;
+$('loadVoices').onclick=()=>loadVoiceList(false);
+$('moreVoices').onclick=()=>loadVoiceList(true);
+$('voiceForm').onsubmit=async event=>{
+  event.preventDefault(); if(voiceSaving || !$('voiceForm').reportValidity()) return;
+  voiceSaving=true; $('saveVoice').disabled=true;
+  try { const result=await voiceRequest('save_voice',{selection:voiceSelection(),version:voiceVersion}); voiceVersion=result.voice_settings.version; state.voice_settings=result.voice_settings; $('voiceMessage').textContent=result.message; await refresh(); }
+  catch(error) { $('voiceMessage').textContent=error.message; }
+  finally { voiceSaving=false; $('saveVoice').disabled=!token; }
+};
+$('testVoice').onclick=async()=>{
+  if(!$('voiceForm').reportValidity()) return;
+  $('testVoice').disabled=true; $('voiceAudio').pause(); $('voiceAudio').hidden=true;
+  try { const result=await voiceRequest('test_voice',{selection:voiceSelection()}); voiceTestingId=result.preview_id; $('voiceMessage').textContent=result.message; await refresh(); }
+  catch(error) { $('voiceMessage').textContent=error.message; $('testVoice').disabled=!token || state.busy; }
+};
 async function boot(){try{token=(await api('/api/session')).token;}catch{}await refresh();setInterval(refresh,5000);}
 boot();

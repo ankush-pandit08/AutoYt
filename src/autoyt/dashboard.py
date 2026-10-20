@@ -29,6 +29,8 @@ TERMINAL = {"PUBLISHED", "AWAITING_REVIEW", "FAILED", "SKIPPED", "READY_TO_UPLOA
 
 class Dashboard:
     def __init__(self, cfg):
+        from .voice_settings import apply
+        cfg = apply(cfg)
         self.cfg = cfg
         cfg.prepare()
         self.store = Store(cfg.database_path)
@@ -37,11 +39,63 @@ class Dashboard:
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="autoyt-manual")
         self.guard = threading.Lock()
         self.future = None
+        self.voice_future = None
+        self.voice_result = None
+        self.voice_last_test = 0.0
         self.notice = ""
         self.started_at = datetime.now(timezone.utc).isoformat()
         self.scheduler = configure(BackgroundScheduler(timezone=cfg.timezone), cfg)
         self.scheduler_lock = portalocker.Lock(str(cfg.database_path) + ".scheduler.lock", timeout=0)
         self.scheduler_owned = False
+
+    def voice_action(self, action, value=None, version=None, page=None):
+        import time
+        from . import voice_settings
+        if action == "voice_list":
+            from .elevenlabs_speech import voices
+            return voices(self.cfg, page)
+        if action == "save_voice":
+            with self.guard:
+                self.cfg, saved = voice_settings.save(self.cfg, value, version)
+                return {"message": "Voice settings saved for new runs. Saved scripts are not translated.", "voice_settings": saved}
+        if action != "test_voice":
+            raise ValueError("Unknown voice action")
+        candidate = voice_settings.validate(self.cfg, value)
+        with self.guard:
+            if self.busy() or (self.voice_future and not self.voice_future.done()):
+                raise ValueError("Wait for the current generation or voice test to finish")
+            if time.monotonic() - self.voice_last_test < 30:
+                raise ValueError("Wait 30 seconds between voice tests to protect API credits")
+            self.voice_last_test = time.monotonic()
+            ident = secrets.token_hex(8)
+            self.voice_result = {"id": ident, "state": "GENERATING"}
+            self.voice_future = self.executor.submit(self._test_voice, candidate, ident)
+            return {"message": "Generating a short voice sample; this may use API credits", "preview_id": ident}
+
+    def _test_voice(self, cfg, ident):
+        from .audio import Speech, check_audio
+        folder = cfg.cache_dir / "voice-previews"
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / (ident + ".wav")
+        import time
+        for previous in folder.glob("*.wav"):
+            if previous.is_file() and not previous.is_symlink() and time.time() - previous.stat().st_mtime > 540:
+                previous.unlink(missing_ok=True)
+        text = {"en": "Welcome to AutoYT. Technology explained clearly.",
+                "hi": "\u0928\u092e\u0938\u094d\u0915\u093e\u0930! \u0906\u091c \u0915\u0940 \u0924\u0915\u0928\u0940\u0915 \u0915\u094b \u0906\u0938\u093e\u0928 \u092d\u093e\u0937\u093e \u092e\u0947\u0902 \u0938\u092e\u091d\u0947\u0902\u0964"}[cfg.narration_language]
+        if cfg.script_style == "hinglish":
+            text = "\u0928\u092e\u0938\u094d\u0915\u093e\u0930! \u0906\u091c \u0915\u093e AI update \u0906\u0938\u093e\u0928 \u092d\u093e\u0937\u093e \u092e\u0947\u0902 \u0938\u092e\u091d\u0924\u0947 \u0939\u0948\u0902\u0964"
+        try:
+            with pipeline_lock(cfg):
+                Speech(cfg).segment(text, target)
+                check_audio(target)
+            self.voice_result = {"id": ident, "state": "READY", "url": "/api/voice-preview/" + ident + ".wav"}
+        except (RuntimeError, ValueError) as error:
+            target.unlink(missing_ok=True)
+            self.voice_result = {"id": ident, "state": "FAILED", "error": str(error)[:350]}
+        except Exception:
+            target.unlink(missing_ok=True)
+            self.voice_result = {"id": ident, "state": "FAILED", "error": "Voice test failed. Check server configuration; no provider was switched."}
 
     def start(self):
         self.scheduler_lock.acquire()
@@ -64,6 +118,8 @@ class Dashboard:
             self.scheduler_lock.release()
 
     def busy(self):
+        if self.voice_future and not self.voice_future.done():
+            return True
         if self.future and not self.future.done():
             return True
         try:
@@ -115,6 +171,7 @@ class Dashboard:
             self.notice = f"Run stopped ({type(error).__name__}). Check the job and run doctor."
 
     def snapshot(self):
+        from .voice_settings import record
         cfg = self.cfg
         from .planning import load_plan
         plan = load_plan(cfg) if cfg.daily_script_batch else None
@@ -141,6 +198,9 @@ class Dashboard:
                           if getattr(j, "next_run_time", None))
         return {"now": datetime.now(zone).isoformat(), "started_at": self.started_at,
                 "auto_enabled": self.scheduler.state == 1, "busy": self.busy(), "notice": self.notice,
+                "voice_settings": record(cfg),
+                "voice_preview": self.voice_result,
+                "voice_keys": {"gemini": bool(cfg.gemini_api_key.strip()), "elevenlabs": bool(cfg.elevenlabs_api_key.strip())},
                 "daily": {"attempts": len(daily), "uploaded": len(today_uploads),
                           "failed": sum(j["state"] == "FAILED" for j in daily), "limit": cfg.max_videos_per_day},
                 "settings": {"timezone": cfg.timezone, "slots": cfg.schedule_times.split(","),
@@ -218,6 +278,13 @@ def make_server(app, port):
             try:
                 if path == "/api/status":
                     return self.send(200, app.snapshot())
+                preview = re.fullmatch(r"/api/voice-preview/([a-f0-9]{16})\.wav", path)
+                if preview:
+                    import time
+                    file = app.cfg.cache_dir / "voice-previews" / (preview[1] + ".wav")
+                    if not file.is_file() or file.is_symlink() or time.time() - file.stat().st_mtime > 540:
+                        return self.send(404, {"error": "Voice sample expired; generate a new test"})
+                    return self.send(200, file.read_bytes(), "audio/wav")
                 if path == "/api/session":
                     return self.send(200, {"token": app.token})
                 if path.startswith("/api/jobs/"):
@@ -288,7 +355,13 @@ def make_server(app, port):
                 value = json.loads(self.rfile.read(length))
                 if not isinstance(value, dict):
                     raise ValueError("Invalid request")
-                result = app.action(value.get("action"), value.get("job_id"), value.get("manual_input"))
+                if value.get("action") in {"voice_list", "save_voice", "test_voice"}:
+                    try:
+                        result = app.voice_action(value["action"], value.get("selection"), value.get("version"), value.get("page"))
+                    except (RuntimeError, ValueError, TypeError) as error:
+                        return self.send(409, {"error": error.errors()[0]["msg"] if isinstance(error, ValidationError) else str(error)[:350]})
+                else:
+                    result = app.action(value.get("action"), value.get("job_id"), value.get("manual_input"))
                 return self.send(200, result)
             except ValidationError as error:
                 return self.send(409, {"error": error.errors()[0]["msg"]})

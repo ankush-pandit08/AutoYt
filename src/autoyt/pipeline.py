@@ -25,6 +25,8 @@ def pipeline_lock(cfg):
 
 class Pipeline:
     def __init__(self, cfg):
+        from .voice_settings import apply
+        cfg = apply(cfg)
         self.cfg = cfg
         cfg.prepare()
         self.store = Store(cfg.database_path)

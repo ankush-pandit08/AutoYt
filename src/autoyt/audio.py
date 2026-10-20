@@ -54,9 +54,9 @@ class Speech:
         if self.cfg.tts_engine == "indicf5":
             from .indicf5_speech import segment
             segment(self.cfg, text, path)
-        elif self.cfg.tts_engine == "gemini":
-            from .gemini_speech import segment
-            segment(self.cfg, text, path)
+        elif self.cfg.tts_engine in {"gemini", "elevenlabs"}:
+            from .tts_providers import provider
+            provider(self.cfg.tts_engine).segment(self.cfg, text, path)
         elif self.cfg.tts_engine == "kokoro":
             lang = "hi" if self.cfg.narration_language == "hi" else "en-us"
             if lang == "en-us" and re.search(r"[\u0900-\u097f]", text):

@@ -9,7 +9,7 @@ from autoyt.models import Claim, Evidence, Research, Script, Source
 @pytest.fixture
 def cfg(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    return Settings(_env_file=None, content_mode="verified_news", output_dir=tmp_path/"output", cache_dir=tmp_path/"cache",
+    return Settings(_env_file=None, tts_engine="kokoro", tts_voice="am_michael", content_mode="verified_news", output_dir=tmp_path/"output", cache_dir=tmp_path/"cache",
                     database_path=tmp_path/"db.sqlite", min_free_gb=0)
 
 
