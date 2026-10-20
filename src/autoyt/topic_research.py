@@ -59,7 +59,14 @@ def verify_evidence(evidence):
 
 def select_official_claims(llm, sources, topic):
     _, lookup = research.passages(sources)
-    eligible = {k: v for k, v in lookup.items() if v[0].primary and int(k.rsplit("p", 1)[1]) < 60}
+    ranked = sorted(((k,v) for k,v in lookup.items() if official_only_source(v[0])),
+                    key=lambda item: discovery.similarity(topic, item[1][1]), reverse=True)
+    eligible, size = {}, 0
+    for key, value in ranked:
+        if len(eligible) >= 16 or size + len(value[1]) > 6500:
+            continue
+        eligible[key] = value
+        size += len(value[1])
     if not eligible:
         raise ValueError("Official pages contain no usable factual passages")
     proposal = create_model("OfficialWebClaim", claim=(str, Field(min_length=15, max_length=140)),
@@ -251,6 +258,9 @@ def gather(cfg, web, llm, topic, folder=None):
     if folder:
         write_json(folder / "source_documents.json", [s.model_dump(mode="json") for s in sources])
     if len({s.publisher for s in sources}) == 1:
+        # A useful official page is sufficient. Do not send an entire site's
+        # navigation-linked documentation to a small provider context window.
+        sources = sorted(sources, key=lambda s: discovery.similarity(query, s.title), reverse=True)[:1]
         claims = select_official_claims(llm, sources, query)
     else:
         try:
@@ -259,7 +269,7 @@ def gather(cfg, web, llm, topic, folder=None):
             official = [s for s in sources if official_only_source(s)]
             if not official:
                 raise
-            sources = [s for s in official if s.publisher == official[0].publisher]
+            sources = sorted(official, key=lambda s: discovery.similarity(query, s.title), reverse=True)[:1]
             claims = select_official_claims(llm, sources, query)
     evidence = Research(sources=sources, claims=claims)
     verify_evidence(evidence)

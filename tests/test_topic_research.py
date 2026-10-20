@@ -200,3 +200,16 @@ def test_shared_repository_host_is_not_sufficient_as_only_official_source(resear
     source=research_data.sources[0].model_copy(update={"url":"https://github.com/random-user/rumors","publisher":"microsoft"})
     with pytest.raises(ValueError,match="official page"):
         topic_research.validate_sources([source])
+
+
+
+def test_official_research_prompt_is_bounded(research_data):
+    source=research_data.sources[0].model_copy(update={"text":" ".join(
+        f"Processors execute computing instructions using documented architecture details in section {i}."
+        for i in range(150))})
+    def check(schema,instruction,data):
+        assert 1 <= len(data["passages"]) <= 16
+        assert sum(len(p["text"]) for p in data["passages"]) <= 6500
+        raise RuntimeError("Bounded prompt checked")
+    with pytest.raises(RuntimeError,match="Bounded prompt checked"):
+        topic_research.select_official_claims(SimpleNamespace(structured=check),[source],"processor architecture")
