@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 
 import httpx
-from pydantic import BaseModel, Field, ValidationError, create_model
+from pydantic import BaseModel, Field, ValidationError, create_model, model_validator
 
 from .discovery import words
 from .models import Scene, Script
@@ -225,13 +225,25 @@ class EditorialDraft(WriterDraft):
     visual_queries: list[str] = Field(min_length=6, max_length=6)
 
 
+class NaturalEditorialDraft(EditorialDraft):
+    narration: list[str] = Field(min_length=1, max_length=6)
+    headlines: list[str] = Field(min_length=1, max_length=6)
+    visual_queries: list[str] = Field(min_length=1, max_length=6)
+
+    @model_validator(mode="after")
+    def matching_scenes(self):
+        if len(self.headlines) != len(self.narration) or len(self.visual_queries) != len(self.narration):
+            raise ValueError("Each narration scene needs one headline and one visual query")
+        return self
+
+
 def read_revision(text):
     data = json.loads(text)
-    schema = EditorialDraft if "headlines" in data or "visual_queries" in data else WriterDraft
+    schema = (NaturalEditorialDraft if len(data.get("narration", [])) < 6 else EditorialDraft) if "headlines" in data or "visual_queries" in data else WriterDraft
     return schema.model_validate(data)
 
 
-def writer_script(draft, topic, research=None, *, source_basis="verified", source_urls=None):
+def writer_script(draft, topic, research=None, *, source_basis="verified", source_urls=None, natural_pacing=False):
     # Structural bookkeeping belongs to Python, leaving the local model to write.
     if any(not line.rstrip().endswith((".", "!", "?", "।", "॥")) for line in draft.narration):
         raise ValueError("Every narration scene must end with a complete punctuated sentence")
@@ -251,7 +263,7 @@ def writer_script(draft, topic, research=None, *, source_basis="verified", sourc
         thumbnail_text=draft.thumbnail_text, hashtags=[topic_tag, "#Technology", "#Shorts"],
         visual_keywords=list(dict.fromkeys(scene.visual_query for scene in scenes)), scenes=scenes,
         source_urls=source_urls if source_urls is not None else [s.url for s in research.sources],
-        source_basis=source_basis, needs_synthetic_media_disclosure=False))
+        source_basis=source_basis, natural_pacing=natural_pacing, needs_synthetic_media_disclosure=False))
 
 
 # Narration and hook are derived from scenes rather than asking a small model to
@@ -265,8 +277,19 @@ def assemble_script(draft):
     data = draft.model_dump()
     data["script"] = " ".join(scene.narration.strip() for scene in draft.scenes)
     data["hook"] = draft.scenes[0].narration.strip()
+    if draft.natural_pacing:
+        opening = data["hook"]
+        hook = re.split(r"(?<=[.!?।॥])\s+", opening, maxsplit=1)[0]
+        if not 10 <= len(hook) <= 200:
+            hook = opening[:200]
+            if len(opening) > 200:
+                hook = hook.rsplit(" ",1)[0] or hook
+        data["hook"] = hook
     count = len(data["script"].split())
-    if not 60 <= count <= 115:
+    if draft.natural_pacing:
+        if not 12 <= count <= 180:
+            raise ValueError(f"Narration has {count} words; use 12–180 words for a natural-paced Short")
+    elif not 60 <= count <= 115:
         raise ValueError(f"Narration has {count} words; use 60–115 total words across all six scenes (aim for 84)")
     return Script.model_validate(data)
 

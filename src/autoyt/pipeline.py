@@ -334,9 +334,13 @@ class Pipeline:
                                              "script_revision.json to fit the configured duration and retry")
                         if revision == 1:
                             raise ValueError("Narration outside duration tolerance after one revision")
-                        script = self._generate_script(job_id,
-                                             f"Measured {duration:.1f}s; target {cfg.video_duration_seconds}s. "
-                                             "Adjust word count within 60–115 words, preserve verified facts.")
+                        feedback = (f"Natural narration measured {duration:.1f}s, outside allowed "
+                                    f"{cfg.duration_min:g}-{cfg.duration_max:g}s. Adjust script length just enough "
+                                    "to fit those bounds. Preserve normal voice speed and supported facts; "
+                                    "do not target a fixed runtime." if script.natural_pacing else
+                                    f"Measured {duration:.1f}s; target {cfg.video_duration_seconds}s. "
+                                    "Adjust word count within 60–115 words, preserve verified facts.")
+                        script = self._generate_script(job_id, feedback)
                         self.llm.release()
                         self._save(job_id, folder, "script", script)
                     self._save(job_id, folder, "timing", segments)

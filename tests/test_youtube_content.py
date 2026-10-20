@@ -93,7 +93,7 @@ def test_writer_creates_original_script_with_metadata_consistency_check(cfg, scr
     def structured(schema, instruction, data):
         if schema is ai.ScriptAudit:
             return ai.ScriptAudit(unsupported_sentences=[], misleading=False, defensive_only=True)
-        assert schema is ai.EditorialDraft  # No independent research or claim-selection request.
+        assert schema is ai.NaturalEditorialDraft  # No independent research or claim-selection request.
         assert "ORIGINAL" in instruction and "supporting_evidence" in instruction
         assert data["supporting_evidence"]["claims"]
         assert "source_brief" not in data
@@ -110,7 +110,7 @@ def test_overlong_original_draft_is_supplied_for_bounded_shortening(cfg, script,
     cfg.content_mode = "youtube_insights"
     topic = youtube_content.topics_from_items([item()], cfg)[0]
     long = draft(script)
-    long.narration = [line + " Additional context about this technology helps explain the topic more clearly."
+    long.narration = [line + " Additional context about this technology helps explain the topic more clearly." * 3
                       for line in long.narration]
     calls = []
 
@@ -130,28 +130,19 @@ def test_overlong_original_draft_is_supplied_for_bounded_shortening(cfg, script,
     assert 60 <= len(result.script.split()) <= 115 and len(calls) == 2
 
 
-def test_short_original_draft_is_expanded_instead_of_shortened(cfg, script, research_data):
-    topic = youtube_content.topics_from_items([item()], cfg)[0]
-    short = draft(script)
-    short.narration = ["This technology changes how people use their devices." for _ in range(6)]
-    calls = []
-
-    def structured(schema, instruction, data):
+def test_short_complete_draft_is_not_expanded_to_fill_time(cfg, script, research_data):
+    topic=youtube_content.topics_from_items([item()],cfg)[0]
+    short=shorts_draft(script)
+    short.narration=['This technology changes how people use their devices.' for _ in range(6)]
+    calls=[]
+    def structured(schema,*args):
         if schema is ai.ScriptAudit:
-            return ai.ScriptAudit(unsupported_sentences=[], misleading=False, defensive_only=True)
-        calls.append(data)
-        if len(calls) == 1:
-            return short
-        assert data["previous_draft"] == short.model_dump()
-        assert "Narration has 48 words; use 60–115" in data["previous_problem"]
-        assert "EXPAND" in data["revision_instruction"]
-        assert "Do not invent facts" in data["revision_instruction"]
-        assert "When previous_draft is supplied, SHORTEN" not in instruction
-        return shorts_draft(script)
-
-    result = youtube_content.generate(cfg, SimpleNamespace(structured=structured), topic,
-                                      supported_brief(topic, research_data))
-    assert 60 <= len(result.script.split()) <= 115 and len(calls) == 2
+            return schema(unsupported_sentences=[],misleading=False,defensive_only=True)
+        calls.append(True)
+        return short
+    result=youtube_content.generate(cfg,SimpleNamespace(structured=structured),topic,supported_brief(topic,research_data))
+    assert len(result.script.split())==48 and len(calls)==1
+    assert result.natural_pacing
 
 
 @pytest.mark.parametrize("bad_quality", [False, True])

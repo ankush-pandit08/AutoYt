@@ -61,6 +61,7 @@ class Scene(BaseModel):
 
 
 class Script(BaseModel):
+    natural_pacing: bool = False
     topic: str
     title: str = Field(min_length=10, max_length=90)
     hook: str = Field(min_length=10, max_length=200)
@@ -69,7 +70,7 @@ class Script(BaseModel):
     hashtags: list[str] = Field(min_length=1, max_length=6)
     visual_keywords: list[str] = Field(min_length=1, max_length=10)
     thumbnail_text: str = Field(min_length=3, max_length=40)
-    scenes: list[Scene] = Field(min_length=6, max_length=10)
+    scenes: list[Scene] = Field(min_length=1, max_length=10)
     source_urls: list[str] = Field(default_factory=list)
     source_basis: Literal["verified", "youtube", "user_input"] = "verified"
     needs_synthetic_media_disclosure: bool = False
@@ -88,8 +89,16 @@ class Script(BaseModel):
             raise ValueError("script must exactly concatenate scene narration")
         if not self.script.startswith(self.hook):
             raise ValueError("hook must start narration")
-        if not 60 <= len(self.script.split()) <= 115:
-            raise ValueError("Narration needs 60–115 words")
+        if self.natural_pacing:
+            if len(self.scenes) > 6:
+                raise ValueError("Natural Shorts support one to six scenes")
+            if not 12 <= len(self.script.split()) <= 180:
+                raise ValueError("Natural Shorts narration needs 12–180 words")
+        else:
+            if len(self.scenes) < 6:
+                raise ValueError("Standard scripts need at least six scenes")
+            if not 60 <= len(self.script.split()) <= 115:
+                raise ValueError("Narration needs 60–115 words")
         if any(x in self.model_dump_json().lower() for x in ("lorem ipsum", "placeholder", "insert here")):
             raise ValueError("Unresolved placeholder")
         if any(not x.startswith("#") or " " in x for x in self.hashtags):

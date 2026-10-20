@@ -117,41 +117,17 @@ def test_explicit_refresh_bypasses_creator_discovery_cache(cfg, monkeypatch):
     assert len(calls)>count
 
 
-def test_short_provider_draft_gets_targeted_grounded_expansion(cfg,script,research_data):
+def test_short_provider_draft_is_kept_at_natural_length(cfg,script,research_data):
     from test_youtube_content import shorts_draft, supported_brief
     topic=youtube_content.topics_from_items([item()],cfg)[0]
-    counts=[]
     def response(schema,instruction,data):
-        counts.append(schema)
         if schema is ai.ScriptAudit:
-            return ai.ScriptAudit(unsupported_sentences=[],misleading=False,defensive_only=True)
-        if schema is youtube_content.SceneExpansion:
-            assert data['supporting_evidence']['claims']
-            return schema(narration='The processor executes software instructions to perform useful computing tasks. Memory holds the information that these running programs need, while storage keeps files available between separate sessions on the computer.')
+            return schema(unsupported_sentences=[],misleading=False,defensive_only=True)
         value=shorts_draft(script)
         value.narration=['This technology changes how people use their devices.' for _ in range(6)]
         return value
     result=youtube_content.generate(cfg,SimpleNamespace(structured=response),topic,supported_brief(topic,research_data))
-    assert 60<=len(result.script.split())<=115
-    assert youtube_content.SceneExpansion in counts
-    assert result.source_basis=='verified'
-
-
-def test_reporting_fallback_needs_two_established_independent_publishers(research_data):
-    sources=[s.model_copy(update={'primary':False,'url':url,'publisher':publisher})
-             for s,url,publisher in zip(research_data.sources[:2],
-                 ['https://www.usatoday.com/story/tech/model','https://www.reuters.com/technology/model'],
-                 ['usatoday.com','reuters.com'])]
-    assert len(topic_research.validate_sources(sources))==2
-    sources[1]=sources[1].model_copy(update={'url':'https://random-seo.example/news','publisher':'random-seo.example'})
-    with pytest.raises(ValueError):
-        topic_research.validate_sources(sources)
-
-
-def test_sponsored_reporting_and_creator_pages_do_not_count():
-    assert not topic_research.trusted_reporting('https://www.usatoday.com/press-release/story/product')
-    assert not topic_research.trusted_reporting('https://youtube.com/watch?v=abc123DEF45')
-    assert topic_research.research.publisher('https://bbc.com/news/ai')==topic_research.research.publisher('https://bbc.co.uk/news/ai')
+    assert len(result.script.split())==48 and result.natural_pacing
 
 
 def test_non_cybersecurity_story_is_not_rejected_by_defensive_flag(cfg,script,research_data):

@@ -16,9 +16,11 @@ Official sources plus independent reporting are preferred. If official pages are
 
 Both morning plans and new manual runs use this research. An unsupported topic is skipped in favor of another eligible creator topic. Scripts from old metadata-only runs must be researched before regeneration. Creator names are excluded from narration and on-screen text; article source links remain in metadata and run details.
 
-## Shorts template
+## Natural narration and flexible scenes
 
-Generated Shorts use six beats: Hook (0–3s), Curiosity (3–8s), Big Reveal (8–16s), Explanation (16–30s), Real Impact (30–40s), Ending (40–45s). Word budgets guide writing without imposing arbitrary per-scene validation ranges. Existing FFmpeg processing fits measured audio to the beat durations without changing pitch; extreme mismatches stop rather than cutting speech. Subtitles and visuals follow the fitted audio. Legacy/manual scripts without target timings keep measured natural timing. Short provider drafts receive a bounded, article-grounded explanation repair and repeat all source and language checks. Benign consumer technology is not rejected by a cybersecurity-only audit field.
+The story arc remains Hook, Curiosity, Big Reveal, Explanation, Real Impact and Ending. Related beats may share a scene; generated Shorts support one to six complete scenes. Richer scripts of roughly 100–140 words are preferred when source evidence supports useful detail, with shorter complete stories accepted and an upper bound of 180 words. No filler, unsupported claims or fixed duration is requested.
+
+Voice audio is never time-stretched, slowed, sped up or padded to meet a 45-second target. Measured narration duration determines scene lengths, subtitles and final video length. Legacy target_seconds metadata is accepted for compatibility and ignored during speech assembly. A natural 25-second narration produces a 25-second video. The existing configured duration safety bounds still apply; an overlong natural Short is shortened only to those bounds, without changing voice speed or targeting 45 seconds. Standard verified-news scripts retain their existing word and scene validation. Source, language, duplicate and quality checks remain active.
 
 ## Run now and scheduler ownership
 
