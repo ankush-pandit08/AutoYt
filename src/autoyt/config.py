@@ -96,7 +96,8 @@ class Settings(BaseSettings):
                                   "huggingface.co", "github.blog", "mistral.ai", "cursor.com",
                                   "ai.meta.com", "ollama.com", "ibm.com", "aws.amazon.com",
                                   "developers.google.com", "fidoalliance.org", "webauthn.guide",
-                                  "git-scm.com", "atlassian.com"]
+                                  "git-scm.com", "atlassian.com", "tesla.com", "spacex.com", "meta.com",
+                                  "about.meta.com", "netflix.com", "research.netflix.com", "elevenlabs.io"]
     local_media_manifest: Path = Path("assets/footage/manifest.json")
 
     @model_validator(mode="after")

@@ -34,6 +34,11 @@ def shorts_draft(script):
     return value
 
 
+def supported_brief(topic, evidence):
+    return youtube_content.brief(topic).model_copy(update={"evidence": evidence,
+        "fact_check_status": "source_supported"})
+
+
 def unchecked_script(script, topic):
     return ai.writer_script(draft(script), topic, source_basis="youtube", source_urls=[topic.url])
 
@@ -80,7 +85,7 @@ def test_discovery_rejects_old_nontech_and_own_channel_videos(cfg):
     assert len(topics) == 1 and topics[0].url.endswith("abc123DEF45")
 
 
-def test_writer_creates_original_script_with_metadata_consistency_check(cfg, script):
+def test_writer_creates_original_script_with_metadata_consistency_check(cfg, script, research_data):
     cfg.content_mode = "youtube_insights"
     topic = youtube_content.topics_from_items([item()], cfg)[0]
     calls = []
@@ -89,18 +94,19 @@ def test_writer_creates_original_script_with_metadata_consistency_check(cfg, scr
         if schema is ai.ScriptAudit:
             return ai.ScriptAudit(unsupported_sentences=[], misleading=False, defensive_only=True)
         assert schema is ai.EditorialDraft  # No independent research or claim-selection request.
-        assert "ORIGINAL" in instruction and "not independently verified" in instruction
-        assert data["source_brief"]["fact_check_status"] == "not_checked"
+        assert "ORIGINAL" in instruction and "supporting_evidence" in instruction
+        assert data["supporting_evidence"]["claims"]
+        assert "source_brief" not in data
         calls.append(schema)
         return shorts_draft(script)
 
     result = youtube_content.generate(cfg, SimpleNamespace(structured=structured), topic,
-                                      youtube_content.brief(topic))
-    assert result.source_basis == "youtube" and result.source_urls == [topic.url]
-    assert all(not s.claim_ids for s in result.scenes) and len(calls) == 1
+                                      supported_brief(topic, research_data))
+    assert result.source_basis == "verified" and result.source_urls == [s.url for s in research_data.sources]
+    assert all(s.claim_ids for s in result.scenes) and len(calls) == 1
 
 
-def test_overlong_original_draft_is_supplied_for_bounded_shortening(cfg, script):
+def test_overlong_original_draft_is_supplied_for_bounded_shortening(cfg, script, research_data):
     cfg.content_mode = "youtube_insights"
     topic = youtube_content.topics_from_items([item()], cfg)[0]
     long = draft(script)
@@ -120,11 +126,11 @@ def test_overlong_original_draft_is_supplied_for_bounded_shortening(cfg, script)
         return shorts_draft(script)
 
     result = youtube_content.generate(cfg, SimpleNamespace(structured=structured), topic,
-                                      youtube_content.brief(topic))
+                                      supported_brief(topic, research_data))
     assert 60 <= len(result.script.split()) <= 115 and len(calls) == 2
 
 
-def test_short_original_draft_is_expanded_instead_of_shortened(cfg, script):
+def test_short_original_draft_is_expanded_instead_of_shortened(cfg, script, research_data):
     topic = youtube_content.topics_from_items([item()], cfg)[0]
     short = draft(script)
     short.narration = ["This technology changes how people use their devices." for _ in range(6)]
@@ -144,18 +150,19 @@ def test_short_original_draft_is_expanded_instead_of_shortened(cfg, script):
         return shorts_draft(script)
 
     result = youtube_content.generate(cfg, SimpleNamespace(structured=structured), topic,
-                                      youtube_content.brief(topic))
+                                      supported_brief(topic, research_data))
     assert 60 <= len(result.script.split()) <= 115 and len(calls) == 2
 
 
 @pytest.mark.parametrize("bad_quality", [False, True])
-def test_pipeline_skips_research_but_keeps_media_quality_and_upload_protection(cfg, script, monkeypatch,
+def test_pipeline_keeps_article_research_quality_and_upload_protection(cfg, script, research_data, monkeypatch,
                                                                             bad_quality):
     cfg.content_mode = "youtube_insights"
     cfg.enable_upload, cfg.youtube_channel_id = True, "my-channel"
     topic = youtube_content.topics_from_items([item()], cfg)[0]
     monkeypatch.setattr(discovery, "discover", lambda *args: [topic])
-    monkeypatch.setattr(youtube_content, "generate", lambda *args, **kwargs: unchecked_script(script, topic))
+    monkeypatch.setattr(youtube_content, "research_brief", lambda *args, **kwargs: supported_brief(topic, research_data))
+    monkeypatch.setattr(youtube_content, "generate", lambda *args, **kwargs: script)
 
     def forbidden(*args, **kwargs):
         pytest.fail("No independent verification, article retrieval or actual upload should occur")
@@ -188,21 +195,22 @@ def test_pipeline_skips_research_but_keeps_media_quality_and_upload_protection(c
     job = runner.create_run(dry_run=not bad_quality)
     assert runner.store.get(job)["state"] == ("FAILED" if bad_quality else "READY_TO_UPLOAD")
     assert checked == [True]
-    assert runner.store.load(job, "research") is None
+    assert runner.store.load(job, "research")["claims"]
     if not bad_quality:
-        assert runner.store.load(job, "content_package")["fact_check_status"] == "not_checked"
+        assert runner.store.load(job, "content_package")["fact_check_status"] == "source_supported"
 
 
-def test_morning_plan_and_prepared_slot_need_no_verified_research(cfg, script, monkeypatch):
+def test_morning_plan_and_prepared_slot_use_article_research(cfg, script, research_data, monkeypatch):
     cfg.content_mode, cfg.max_videos_per_day, cfg.schedule_times = "youtube_insights", 1, "06:00"
     topic = youtube_content.topics_from_items([item()], cfg)[0]
     monkeypatch.setattr(discovery, "discover", lambda *args: [topic])
-    monkeypatch.setattr(youtube_content, "generate", lambda *args: unchecked_script(script, topic))
+    monkeypatch.setattr(youtube_content, "research_brief", lambda *args, **kwargs: supported_brief(topic, research_data))
+    monkeypatch.setattr(youtube_content, "generate", lambda *args: script)
     monkeypatch.setattr(research, "research", lambda *args: pytest.fail("Research must be off"))
     plan = planning.prepare_day(cfg)
     assert plan["state"] == "READY" and plan["content_mode"] == "youtube_insights"
     entry = plan["entries"][0]
-    assert "research" not in entry and entry["source_brief"]["fact_check_status"] == "not_checked"
+    assert "research" not in entry and entry["source_brief"]["fact_check_status"] == "source_supported"
     runner = Pipeline(cfg)
     monkeypatch.setattr(runner, "execute", lambda job: job)
     job = runner.create_run(prepared=entry, slot="2026-10-20T06:00", dry_run=True)

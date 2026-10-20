@@ -168,7 +168,7 @@ class Dashboard:
             runner = Pipeline(self.cfg)
             options = {"manual_input": manual_input} if manual_input else {}
             result = runner.retry(job_id) if action == "retry" else runner.create_run(
-                dry_run=action == "preview", **options)
+                dry_run=action == "preview", fresh=True, **options)
             if result:
                 job = self.store.get(result)
                 if job["state"] in ("FAILED", "SKIPPED"):
@@ -237,10 +237,9 @@ class Dashboard:
                                 "entries": [{"slot": e["slot"], "title": e["script"]["title"],
                                              "script": e["script"]["script"]} for e in plan["entries"]]}
                                if plan else None),
-                "writing_warning": ("YouTube titles and descriptions guide original scripts. Independent fact "
-                    "checking is disabled; no transcripts or full videos are retrieved. Popularity is a topic "
-                    "signal, not proof of accuracy. Audio, license and video checks still apply."
-                    if cfg.content_mode == "youtube_insights" else
+                "writing_warning": ("Creators supply topics only. Generated scripts require retrieved "
+                    "article evidence from distinct publishers. Sources are shown in run details; "
+                    "popularity is not proof." if cfg.content_mode == "youtube_insights" else
                     "Trending sources guide topic selection. Engagement and virality are not guaranteed. "
                     "Failed evidence or quality checks stop publication.")}
 

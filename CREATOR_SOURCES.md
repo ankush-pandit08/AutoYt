@@ -1,17 +1,25 @@
-# Preferred creator sources
+# Creator topics and supporting article research
 
-Verified with YouTube channels.list(forHandle=...) on 20 October 2026:
+Preferred topic channels (verified on 20 October 2026):
 
 - Varun Mayya: https://www.youtube.com/@VarunMayya — UCsQoiOrh7jzKmE8NBofhTnQ
 - 100x Engineers: https://www.youtube.com/@100xEngineers — UCoch_d78Aosmp14ey1HgGSQ
 - Aevy TV: https://www.youtube.com/@aevytv — UCA295QVkf9O1RQ8_-s3FVXg
 
-Local personal environment and example settings enable these creator_channel_ids, prefer_tech_insights=true and topic_focus=ai_coding. The current YouTube discovery mode now reads their public upload playlists, fetches video metadata/statistics in bounded batches, and uses those creators as the topic pool. With creators configured, generic trending/search topics are not substituted. Relevant recent AI capabilities, launches, gadgets, wearables, robotics and future technology developments are preferred; generic tutorials, evergreen computer tips, courses and revenue stories are excluded. If no eligible topic exists, the run skips rather than filling the slot with unrelated content. Subscription state is not changed. Sources older than seven days, unrelated topics and the application's own channel remain excluded. Missing individual creator playlists do not block the others. Discovery cache identity includes the creator list and topic focus.
+Configured creators supply topic ideas only. Bounded public upload-playlist reads find recent technology developments; generic trending topics do not replace the configured creators. Tutorials, courses, evergreen computer tips, revenue stories, unrelated subjects and the application's own channel are excluded. No subscriptions, transcripts or creator video downloads are involved.
 
-Scripts remain original, with source links retained in metadata and creator names excluded from narration and on-screen text; no transcripts or full creator videos are downloaded. Today's saved plan is not rewritten. Production deployments must apply the same public source settings while preserving the current saved plan, voice settings and upload schedule.
+## Supporting evidence
 
-## Shorts script template
+Before scripting, the app searches for related article links and retrieves real article text with the existing public-HTTPS, redirect and robots controls. Search snippets, creator titles and descriptions are never claim evidence. Source URLs, documents and retrieval diagnostics are retained with the research. Older documentation can explain a capability but cannot establish a new launch date.
 
-Each newly generated script follows six unequal beats: Hook (0–3s), Curiosity (3–8s), Big Reveal (8–16s), Explanation (16–30s), Real Impact (30–40s), Ending (40–45s). Beat word budgets favor a short hook and longer explanation. They are writing guidance, not per-scene validation limits; measured audio determines whether each beat fits. Requested beat durations are stored with generated scenes. Pitch-preserving FFmpeg tempo adjustment fits each beat, allowing a bounded closing pause. Extreme timing mismatches fail with an actionable message instead of cutting speech or publishing a broken Short. Subtitles and visuals follow the fitted audio. Legacy/manual scripts without beat targets retain their existing measured timing. Existing quality checks remain active.
+Official sources plus independent reporting are preferred. If official pages are inaccessible, two established independent reporting publishers must corroborate the selected core claims. Sponsored pages, syndicated press releases, copied article text and related publisher families do not count as independent corroboration. Quotes must be exact substrings of retrieved articles; numerical claims need support in each quotation. Preselected pairs from different publishers constrain the model's claim selection. A semantic source audit checks full meaning, uncertainty and context, and a separate script audit checks the resulting narration and on-screen text. These are evidence checks, not proof that a company's claimed performance has been independently demonstrated.
 
-Narration uses the selected English, Hindi or Hinglish setting. Hindi/Hinglish requires Devanagari in every scene. Creator names are checked before accepting generated scripts. Rumors, concepts, prototypes and company claims must remain qualified; a metadata-consistency audit rejects unsupported product details. Metadata is not independent fact verification, and thin descriptions may cause a script to be rejected instead of inventing a product mechanism. Manually supplied scripts keep their words and are not forced into generated beat word budgets. Existing saved plans are not silently rewritten.
+Both morning plans and new manual runs use this research. An unsupported topic is skipped in favor of another eligible creator topic. Scripts from old metadata-only runs must be researched before regeneration. Creator names are excluded from narration and on-screen text; article source links remain in metadata and run details.
+
+## Shorts template
+
+Generated Shorts use six beats: Hook (0–3s), Curiosity (3–8s), Big Reveal (8–16s), Explanation (16–30s), Real Impact (30–40s), Ending (40–45s). Word budgets guide writing without imposing arbitrary per-scene validation ranges. Existing FFmpeg processing fits measured audio to the beat durations without changing pitch; extreme mismatches stop rather than cutting speech. Subtitles and visuals follow the fitted audio. Legacy/manual scripts without target timings keep measured natural timing. Short provider drafts receive a bounded, article-grounded explanation repair and repeat all source and language checks. Benign consumer technology is not rejected by a cybersecurity-only audit field.
+
+## Run now and scheduler ownership
+
+Run now and Preview create fresh jobs, refresh creator discovery, and do not consume a saved daily script or resume old work. Interrupted pre-upload history is retained as failed when a fresh run replaces it. An unresolved upload must be reconciled through Retry first to prevent duplicate publication. Scheduled slots retain their separate prepared-plan and crash-recovery behavior. Published stories and corroborated facts are deduplicated. Source/API failures never silently switch voice or model providers. Existing upload schedules, voice preferences and video cleanup policy remain unchanged. Only the production server scheduler runs.

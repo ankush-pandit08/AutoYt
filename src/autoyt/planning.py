@@ -65,7 +65,12 @@ def prepare_day(cfg, moment=None):
                 folder.mkdir(parents=True, exist_ok=True)
                 try:
                     if cfg.content_mode == "youtube_insights":
-                        source = youtube_content.brief(topic, candidates)
+                        source = youtube_content.research_brief(cfg, web, llm, topic, candidates, folder)
+                        planned = [e["source_brief"]["evidence"] for e in plan["entries"]
+                                   if e.get("source_brief", {}).get("evidence")]
+                        if source.evidence and discovery.repeated_insight(
+                                [c.claim for c in source.evidence.claims], prior_evidence + planned):
+                            raise ValueError("This supported story was already covered or planned")
                         script = youtube_content.generate(cfg, llm, topic, source)
                         source_artifact = {"source_brief": source.model_dump(mode="json")}
                     else:
@@ -85,7 +90,7 @@ def prepare_day(cfg, moment=None):
                     log.info("Morning plan: %s/%s scripts ready", len(plan["entries"]), len(plan["slots"]))
                 except ValueError:
                     plan["rejected"].append({"topic": topic.title, "reason":
-                        "Source, script format or duplicate check failed" if cfg.content_mode == "youtube_insights"
+                        "Supporting article research, script or duplicate check failed" if cfg.content_mode == "youtube_insights"
                         else "Evidence, script or originality check failed"})
                 plan["cursor"] += 1
                 write_json(path, plan)

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import soundfile as sf
-from test_youtube_content import item, shorts_draft
+from test_youtube_content import item, shorts_draft, supported_brief
 
 from autoyt import ai, youtube, youtube_content
 from autoyt.audio import Speech, check_audio
@@ -44,9 +44,10 @@ def test_creator_pool_has_no_generic_trending_fallback(cfg, monkeypatch):
     assert [t.title for t in topics] == ["Meta unveils new wearable glasses"]
 
 
-def test_six_beats_and_source_names_are_not_spoken(cfg, script):
+def test_six_beats_and_source_names_are_not_spoken(cfg, script, research_data):
     source = youtube_content.SourceBrief(basis="youtube", topic="New AI model", videos=[
         {"url": "https://youtu.be/abc123DEF45", "channel": "Varun Mayya"}])
+    source.evidence = research_data
     topic = youtube_content.topics_from_items([item()], cfg)[0]
     seen = []
     def generate(schema, instruction, data):
@@ -68,15 +69,16 @@ def test_six_beats_and_source_names_are_not_spoken(cfg, script):
         (0, 3), (3, 8), (8, 16), (16, 30), (30, 40), (40, 45)]
     assert [s.target_seconds for s in result.scenes] == [3, 5, 8, 14, 10, 5]
     assert "Varun" not in result.script
-    assert result.source_urls == ["https://youtu.be/abc123DEF45"]
+    assert result.source_urls == [s.url for s in research_data.sources]
 
 
 @pytest.mark.parametrize("reveal", [
     "The new AI model processes camera input and answers spoken questions.",
     "The newly announced AI model processes camera input alongside spoken questions, so users can ask about visible objects and receive explanations while using the device.",
 ])
-def test_big_reveal_word_budget_is_advisory(cfg, script, reveal):
+def test_big_reveal_word_budget_is_advisory(cfg, script, reveal, research_data):
     source = youtube_content.SourceBrief(basis="youtube", topic="AI", videos=[{"url": "https://youtu.be/abc123DEF45"}])
+    source.evidence = research_data
     calls = []
     def generate(schema, instruction, data):
         if schema is ai.ScriptAudit:
@@ -112,16 +114,16 @@ def test_timed_speech_keeps_subtitle_timeline(cfg, script, tmp_path, monkeypatch
     assert timings[-1]["end"] <= segments[-1]["end"] + .001
 
 
-def test_hinglish_does_not_accept_english_only_narration(cfg, script):
+def test_hinglish_does_not_accept_english_only_narration(cfg, script, research_data):
     cfg.narration_language = "hi"
     cfg.script_style = "hinglish"
     topic = youtube_content.topics_from_items([item()], cfg)[0]
     with pytest.raises(ValueError, match="Hindi in Devanagari"):
         youtube_content.generate(cfg, SimpleNamespace(structured=lambda *args: shorts_draft(script)),
-                                 topic, youtube_content.brief(topic))
+                                 topic, supported_brief(topic, research_data))
 
 
-def test_unsupported_product_mechanisms_are_rejected(cfg, script):
+def test_unsupported_product_mechanisms_are_rejected(cfg, script, research_data):
     topic = youtube_content.topics_from_items([item()], cfg)[0]
     def generate(schema, instruction, data):
         if schema is ai.ScriptAudit:
@@ -129,8 +131,8 @@ def test_unsupported_product_mechanisms_are_rejected(cfg, script):
             return ai.ScriptAudit(unsupported_sentences=["Invented product mechanism"],
                                   misleading=True, defensive_only=True)
         return shorts_draft(script)
-    with pytest.raises(ValueError, match="Source metadata does not support"):
-        youtube_content.generate(cfg, SimpleNamespace(structured=generate), topic, youtube_content.brief(topic))
+    with pytest.raises(ValueError, match="Retrieved articles do not support"):
+        youtube_content.generate(cfg, SimpleNamespace(structured=generate), topic, supported_brief(topic, research_data))
 
 
 def test_timing_mismatch_fails_without_cutting_or_uploading(cfg, script, tmp_path, monkeypatch):

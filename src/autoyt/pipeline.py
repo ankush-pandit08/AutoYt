@@ -33,7 +33,7 @@ class Pipeline:
         self.web = Web()
         self.llm = ai.LLM(cfg)
 
-    def create_run(self, dry_run=False, topic=None, slot=None, prepared=None, manual_input=None):
+    def create_run(self, dry_run=False, topic=None, slot=None, prepared=None, manual_input=None, fresh=False):
         request = ManualRequest.model_validate(manual_input) if manual_input is not None else None
         if request and (slot or prepared or topic):
             raise ValueError("A custom request must be a separate manual run")
@@ -43,7 +43,7 @@ class Pipeline:
                 script = Script.model_validate(prepared["script"])
                 if prepared.get("source_brief"):
                     source = youtube_content.SourceBrief.model_validate(prepared["source_brief"])
-                    if script.source_basis != source.basis or (source.basis == "youtube" and not source.videos):
+                    if script.source_basis != ("verified" if source.evidence else source.basis) or (source.basis == "youtube" and (not source.videos or not source.evidence)):
                         raise ValueError("Prepared script does not match its saved source basis")
                 else:
                     evidence = Research.model_validate(prepared["research"])
@@ -53,16 +53,27 @@ class Pipeline:
             # Interrupted active work takes priority over creating another job.
             active = [j for j in self.store.jobs(limit=None) if j["state"] in STAGES + ["CREATED", "UPLOADING"]]
             if active:
-                if request:
-                    raise ValueError("Retry or finish the interrupted run before starting your custom input")
-                if bool(active[-1]["dry_run"]) != dry_run:
-                    raise ValueError("An interrupted job has a different dry-run mode; retry its ID first")
-                return self.execute(active[-1]["id"])
+                if fresh:
+                    for interrupted in active:
+                        attempt = self.store.attempt(interrupted["id"])
+                        if attempt and (attempt["video_id"] or attempt["session_uri"] or attempt["state"] != "REJECTED"):
+                            raise ValueError("An upload needs reconciliation. Retry its ID before creating a fresh run")
+                    # Holding the pipeline lock proves these rows have no running worker.
+                    # Preserve their history while allowing the explicit fresh-run request.
+                    for interrupted in active:
+                        self.store.update(interrupted["id"], "FAILED",
+                            error="Interrupted work retained in history; a fresh manual run was requested")
+                else:
+                    if request:
+                        raise ValueError("Retry or finish the interrupted run before starting your custom input")
+                    if bool(active[-1]["dry_run"]) != dry_run:
+                        raise ValueError("An interrupted job has a different dry-run mode; retry its ID first")
+                    return self.execute(active[-1]["id"])
             job_id = self.store.create(dry_run, request.topic if request else topic, slot,
                                        self.cfg.max_videos_per_day, self.cfg.timezone)
             if job_id:
                 self.store.save(job_id, "request", {"topic_filter": request.topic if request else topic,
-                    "manual_input": request.model_dump() if request else None})
+                    "manual_input": request.model_dump() if request else None, "fresh": fresh})
                 if prepared:
                     folder = self.cfg.output_dir / job_id
                     folder.mkdir(parents=True, exist_ok=True)
@@ -126,11 +137,19 @@ class Pipeline:
         topic = Topic.model_validate(self.store.load(job_id, "topic"))
         source = self.store.load(job_id, "source_brief")
         if source:
+            source = youtube_content.SourceBrief.model_validate(source)
+            if source.basis == "youtube" and source.evidence is None:
+                source = youtube_content.research_brief(self.cfg, self.web, self.llm, topic,
+                    folder=self.cfg.output_dir / job_id)
+                self._save(job_id, self.cfg.output_dir / job_id, "source_brief", source)
+                self._save(job_id, self.cfg.output_dir / job_id, "research", source.evidence)
+                self._save(job_id, self.cfg.output_dir / job_id, "editorial",
+                           youtube_content.selection_details(topic, source))
             return youtube_content.generate(self.cfg, self.llm, topic,
-                youtube_content.SourceBrief.model_validate(source), *args, **kwargs)
+                source, *args, **kwargs)
         if self.cfg.content_mode == "youtube_insights":
             raise ValueError("This saved run uses the previous verified-news workflow. "
-                             "Start a new run to use YouTube topics without fact verification")
+                             "Start a new run to use creator topics with supporting article research")
         return ai.generate(self.cfg, self.llm, topic,
                            Research.model_validate(self.store.load(job_id, "research")), *args, **kwargs)
 
@@ -156,10 +175,11 @@ class Pipeline:
                         candidates = [Topic.model_validate(saved)]
                     else:
                         candidates = (find_candidates(cfg, self.web, self.llm, request) if request else
+                                      youtube_content.discover(cfg, refresh=True) if cfg.content_mode == "youtube_insights"
+                                      and (db.load(job_id, "request") or {}).get("fresh") else
                                       discovery.discover(cfg, self.web))
                         previous = db.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
-                        if cfg.content_mode != "youtube_insights":
-                            previous += db.recent_research_rejections()
+                        previous += db.recent_research_rejections()
                         candidates = [t for t in candidates if not discovery.duplicate(t.title, previous)]
                         if not request and (cfg.prefer_tech_insights or cfg.topic_focus == "ai_coding"):
                             candidates = discovery.rank_insights(candidates, db.recent_topics(
@@ -194,9 +214,35 @@ class Pipeline:
                     if cfg.content_mode == "youtube_insights":
                         selected = Topic.model_validate(db.load(job_id, "topic"))
                         candidates = [Topic.model_validate(t) for t in (db.load(job_id, "candidates") or [])]
-                        source = youtube_content.brief(selected, candidates)
+                        previous = [t for t in db.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
+                                    if t != selected.title]
+                        choices = [selected, *[t for t in candidates if t.url != selected.url]]
+                        choices = [t for t in choices if not discovery.duplicate(t.title, previous)][:cfg.research_candidate_limit]
+                        failures = []
+                        for candidate in choices:
+                            try:
+                                source = youtube_content.research_brief(cfg, self.web, self.llm, candidate, candidates, folder)
+                                if source.evidence and discovery.repeated_insight(
+                                        [c.claim for c in source.evidence.claims],
+                                        db.recent_research(cfg.topic_dedup_days, job_id, cfg.youtube_privacy)):
+                                    raise ValueError("This supported story was already covered; trying another creator topic")
+                            except ValueError as error:
+                                failures.append({"topic": candidate.title, "reason": str(error)[:300]})
+                                self._save(job_id, folder, "research_attempts", failures)
+                                continue
+                            self._save(job_id, folder, "topic", candidate)
+                            db.reserve_topic(job_id, candidate.title, discovery.fingerprint(candidate.title),
+                                             cfg.youtube_privacy, cfg.topic_dedup_days)
+                            db.update(job_id, STAGES[index], topic=candidate.title)
+                            break
+                        else:
+                            db.update(job_id, "SKIPPED", error="No creator topic had sufficient supporting articles. "
+                                      "See research attempts and try again when supporting coverage is available.")
+                            return job_id
                         self._save(job_id, folder, "source_brief", source)
-                        self._save(job_id, folder, "editorial", youtube_content.selection_details(selected, source))
+                        if source.evidence:
+                            self._save(job_id, folder, "research", source.evidence)
+                        self._save(job_id, folder, "editorial", youtube_content.selection_details(candidate, source))
                     else:
                         candidates = [Topic.model_validate(t) for t in (db.load(job_id, "candidates") or [])
                                       if isinstance(t, dict)]
@@ -317,7 +363,7 @@ class Pipeline:
                                            folder / "narration.wav")
                     self._save(job_id, folder, "validation", result)
                     topic = Topic.model_validate(db.load(job_id, "topic"))
-                    if script.source_basis != "verified":
+                    if db.load(job_id, "source_brief"):
                         package = youtube_content.content_package(topic,
                             youtube_content.SourceBrief.model_validate(db.load(job_id, "source_brief")), script,
                             db.load(job_id, "caption_timing"), db.load(job_id, "media_assets"), folder)

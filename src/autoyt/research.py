@@ -30,7 +30,9 @@ def evidence_words(text):
 def publisher(url):
     host = urlsplit(url).hostname or ""
     # Conservative publisher families; subdomains and owned publications are not independent.
-    for family, domains in {"google": ["google.com", "blog.google", "googleblog.com", "deepmind.google"],
+    for family, domains in {"bbc": ["bbc.com", "bbc.co.uk"],
+                            "meta": ["meta.com", "fb.com"],
+                            "google": ["google.com", "blog.google", "googleblog.com", "deepmind.google"],
                             "microsoft": ["microsoft.com", "github.com", "github.blog"],
                             "vox": ["theverge.com", "vox.com"],
                             "conde-nast": ["arstechnica.com", "wired.com"]}.items():
@@ -106,7 +108,7 @@ def extract(url, html, cfg, date_hint=None, *, evergreen=False):
                   retrieved_at=current, primary=primary(url, cfg), publisher=publisher(url))
 
 
-def independent_sources(sources):
+def independent_sources(sources, *, require_primary=True):
     accepted, hashes = [], set()
     for source in sources:
         hashed = hashlib.sha256(" ".join(source.text.lower().split()).encode()).hexdigest()
@@ -114,7 +116,7 @@ def independent_sources(sources):
             continue
         hashes.add(hashed)
         accepted.append(source)
-    if len({s.publisher for s in accepted}) < 2 or not any(s.primary for s in accepted):
+    if len({s.publisher for s in accepted}) < 2 or (require_primary and not any(s.primary for s in accepted)):
         raise ValueError("Need two independent sources including an official primary source")
     return accepted
 
@@ -325,7 +327,7 @@ def select_claims(llm, sources, folder=None, topic=None, *, include_primary=Fals
     raise ValueError("Claim selection failed exact evidence checks after two attempts")
 
 
-def verify_claims(claims, sources):
+def verify_claims(claims, sources, *, require_primary=True, minimum_overlap=.65):
     lookup = {s.url: s for s in sources}
     for claim in claims:
         families = set()
@@ -338,14 +340,14 @@ def verify_claims(claims, sources):
             if quote not in " ".join(source.text.lower().split()):
                 raise ValueError("Evidence quotation absent from retrieved document")
             cw = evidence_words(claim.claim)
-            if len(cw & evidence_words(quote)) / max(1, len(cw)) < .65:
+            if len(cw & evidence_words(quote)) / max(1, len(cw)) < minimum_overlap:
                 raise ValueError("Claim exceeds quoted evidence from " + source.publisher)
             for number in re.findall(r"\b\d+(?:[.,]\d+)*\b", claim.claim):
                 if number not in quote:
                     raise ValueError("Numeric claim lacks independent support")
             families.add(source.publisher)
             has_primary |= source.primary
-        if len(families) < 2 or not has_primary:
+        if len(families) < 2 or (require_primary and not has_primary):
             raise ValueError("Each claim needs primary and independent corroboration")
 
 
