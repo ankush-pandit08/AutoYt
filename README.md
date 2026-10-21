@@ -1,5 +1,7 @@
 # AutoYT
 
+Local motion graphics are available in **Normal**, **Motion Graphics**, and **Hybrid** modes. The dashboard also offers **Groq** or **Gemini** for script generation, independently of voice settings. See [MOTION_GRAPHICS.md](MOTION_GRAPHICS.md) for setup, mode behavior, previews and licensing, and [the implementation plan](docs/motion-graphics-plan.md) for acceptance criteria.
+
 Personal, local automation for **one** technology YouTube channel. Python, SQLite, optional Ollama or Gemini/Groq API, local or Gemini narration and FFmpeg. No account system, payments, queue service, or cloud hosting. An optional dashboard runs on localhost using Python's standard library.
 
 YouTube technology discovery → original script → voice → relevant licensed stock or original explanatory graphics → animated captions → cover → media validation → upload with the configured **private or public** visibility.

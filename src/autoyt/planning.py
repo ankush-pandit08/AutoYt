@@ -23,6 +23,8 @@ def load_plan(cfg, moment=None):
 
 
 def prepare_day(cfg, moment=None):
+    from .script_settings import apply as apply_script
+    cfg = apply_script(cfg)
     from .voice_settings import apply
     cfg = apply(cfg)
     cfg.prepare()

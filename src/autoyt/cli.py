@@ -113,6 +113,9 @@ def main(argv=None):
     try:
         from .voice_settings import apply
         cfg = apply(Settings())
+        from .render_settings import apply as apply_render
+        from .script_settings import apply as apply_script
+        cfg = apply_script(apply_render(cfg))
         cfg.prepare()
         handler = RotatingFileHandler("data/logs/autoyt.log", maxBytes=2_000_000, backupCount=3, encoding="utf-8")
         logging.basicConfig(level=logging.INFO, handlers=[logging.StreamHandler(), handler],

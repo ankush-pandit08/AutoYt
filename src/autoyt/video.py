@@ -1,4 +1,4 @@
-import math
+import logging
 import re
 import shutil
 from pathlib import Path
@@ -6,6 +6,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from .audio import check_audio, probe, run
+from .store import write_json
 
 
 def font(size, bold=False):
@@ -182,6 +183,30 @@ def stock_labels(cfg, segments, assets, folder):
 
 
 def render(cfg, script, segments, assets, folder):
+    requested = cfg.render_mode
+    effective, fallback = requested, None
+    render_assets, scenes = assets, []
+    if requested != "normal":
+        from .motion import plan, render_clips
+        scenes = plan(cfg, script, segments, assets)
+        try:
+            render_assets, scenes = render_clips(cfg, script, segments, assets, folder.resolve())
+        except (RuntimeError, OSError) as error:
+            if not cfg.render_fallback:
+                raise RuntimeError("CONFIGURATION: Motion graphics unavailable; run scripts/setup_motion.ps1 "
+                                   "or choose Normal mode / enable fallback") from None
+            effective = "normal"
+            fallback = "Motion renderer unavailable; configured Normal fallback was used (" + type(error).__name__ + ")"
+            logging.getLogger(__name__).warning(fallback)
+    report = {"requested_mode": requested, "effective_mode": effective, "fallback_reason": fallback,
+              "scenes": scenes, "status": "rendering"}
+    write_json(folder / "render_report.json", report)
+    result = _render_normal(cfg, script, segments, render_assets, folder)
+    write_json(folder / "render_report.json", {**report, "status": "completed"})
+    return result
+
+
+def _render_normal(cfg, script, segments, assets, folder):
     folder = folder.resolve()
     local_fonts(cfg, folder)
     stock_labels(cfg, segments, assets, folder)
@@ -190,10 +215,17 @@ def render(cfg, script, segments, assets, folder):
     total = voice_duration
     clips = []
     for i, (scene, segment, asset) in enumerate(zip(script.scenes, segments, assets)):
+        if asset["kind"] == "motion":
+            # Remux to the same MP4 timebase as FFmpeg scenes, without re-encoding.
+            name = f"clip-{i:02d}.mp4"
+            run([cfg.ffmpeg, "-y", "-v", "error", "-i", asset["path"], "-an", "-c:v", "copy",
+                 "-video_track_timescale", str(fps*512), name], cwd=folder)
+            clips.append(name)
+            continue
         seconds = segment["end"] - segment["start"]
         if i == len(segments)-1:
             seconds += total-voice_duration
-        frames = math.ceil(seconds * fps)
+        frames = max(1, round(segment["end"]*fps)-round(segment["start"]*fps))
         card(cfg, scene.headline, script.title, folder / f"scene-{i}.png", i,
              asset["kind"] in ("stock", "stock_image"))
         name = f"clip-{i:02d}.mp4"
@@ -210,7 +242,8 @@ def render(cfg, script, segments, assets, folder):
                        "fade=t=in:st=0:d=0.12,format=yuv420p,setparams=range=limited")
         run([cfg.ffmpeg, "-y", "-v", "error", *inputs, "-vf", filters,
              "-frames:v", str(frames), "-an", "-c:v", "libx264", "-preset", cfg.encoder_preset,
-             "-crf", str(cfg.crf), "-threads", "2", "-pix_fmt", "yuv420p", "-color_range", "tv", name], cwd=folder)
+             "-crf", str(cfg.crf), "-threads", "2", "-pix_fmt", "yuv420p", "-color_range", "tv",
+             "-video_track_timescale", str(fps*512), name], cwd=folder)
         clips.append(name)
     (folder / "concat.txt").write_text("\n".join(f"file '{c}'" for c in clips), encoding="utf-8")
     run([cfg.ffmpeg, "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", "concat.txt",

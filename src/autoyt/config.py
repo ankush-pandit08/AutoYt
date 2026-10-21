@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     llm_provider: Literal["ollama", "groq", "gemini"] = "ollama"
     gemini_api_key: str = Field(default="", repr=False)
     gemini_model: str = Field(default="gemini-3.8-flash", pattern=r"^[a-zA-Z0-9._-]+$")
+    gemini_thinking_level: Literal["minimal", "low", "medium", "high"] = "low"
     groq_api_key: str = Field(default="", repr=False)
     groq_model: str = "qwen/qwen3.8-27b"
     ollama_model: str = "qwen3:4b-instruct"
@@ -62,11 +63,19 @@ class Settings(BaseSettings):
     duration_max: float = 60
     encoder_preset: str = "fast"
     crf: int = Field(default=20, ge=15, le=28)
+    render_mode: Literal["normal", "motion_graphics", "hybrid"] = "normal"
+    render_fallback: bool = True
+    remotion_node: str = "node"
+    remotion_concurrency: int = Field(default=1, ge=1, le=4)
+    remotion_timeout_seconds: int = Field(default=1800, ge=30, le=7200)
     max_videos_per_day: int = Field(default=3, ge=1, le=10)
     topic_dedup_days: int = Field(default=14, ge=1)
     prefer_tech_insights: bool = False
     topic_focus: Literal["technology", "ai_coding"] = "technology"
     research_candidate_limit: int = Field(default=40, ge=12, le=100)
+    research_timeout_seconds: int = Field(default=240, ge=30, le=900)
+    llm_request_timeout_seconds: int = Field(default=60, ge=5, le=180)
+    source_review_timeout_seconds: int = Field(default=25, ge=5, le=60)
     enable_evergreen_fallback: bool = False
     editorial_references: list[str] = []
     creator_channel_ids: list[str] = []

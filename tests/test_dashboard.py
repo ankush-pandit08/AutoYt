@@ -80,6 +80,9 @@ def test_http_access_controls_and_media_ranges(cfg):
         with urlopen(base) as response:
             assert b"Channel overview" in response.read()
             assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+        with urlopen(base + "/ui.mjs") as response:
+            assert "javascript" in response.headers["Content-Type"]
+            assert b"runIntent" in response.read()
         for headers in ({"Host": "evil.example"},):
             with pytest.raises(Exception) as caught:
                 urlopen(Request(base + "/api/status", headers=headers))

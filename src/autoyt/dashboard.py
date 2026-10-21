@@ -32,6 +32,10 @@ class Dashboard:
     def __init__(self, cfg):
         from .voice_settings import apply
         cfg = apply(cfg)
+        from .render_settings import apply as apply_render
+        cfg = apply_render(cfg)
+        from .script_settings import apply as apply_script
+        cfg = apply_script(cfg)
         self.cfg = cfg
         cfg.prepare()
         self.store = Store(cfg.database_path)
@@ -51,6 +55,7 @@ class Dashboard:
 
     def voice_action(self, action, value=None, version=None, page=None):
         import time
+
         from . import voice_settings
         if action == "voice_list":
             from .elevenlabs_speech import voices
@@ -136,7 +141,25 @@ class Dashboard:
         except portalocker.exceptions.LockException:
             return True
 
-    def action(self, action, job_id=None, manual_input=None):
+    def action(self, action, job_id=None, manual_input=None, render_mode=None):
+        from . import render_settings
+        if action == "save_script":
+            from . import script_settings
+            if not isinstance(manual_input, dict) or set(manual_input) != {"selection", "version"}:
+                raise ValueError("Choose a script provider and version")
+            with self.guard:
+                self.cfg, saved = script_settings.save(self.cfg, manual_input["selection"], manual_input["version"])
+                return {"message": "Script provider saved for new runs. Existing jobs keep their saved provider.", "script_settings": saved}
+        if action == "save_render":
+            if not isinstance(manual_input, dict) or set(manual_input) != {"selection", "version"}:
+                raise ValueError("Choose a rendering selection and version")
+            with self.guard:
+                self.cfg, saved = render_settings.save(self.cfg, manual_input["selection"], manual_input["version"])
+                return {"message": "Rendering default saved for new manual and scheduled runs.", "render_settings": saved}
+        if render_mode is not None:
+            if action not in ("run", "preview"):
+                raise ValueError("Only new videos can choose a rendering mode; retries keep their saved selection")
+            render_settings.RenderSelection(render_mode=render_mode)
         if manual_input is not None:
             if action not in ("run", "preview"):
                 raise ValueError("Custom input is only available for a new run or preview")
@@ -160,13 +183,15 @@ class Dashboard:
                 if not JOB_ID.fullmatch(job_id or "") or self.store.get(job_id)["state"] != "FAILED":
                     raise ValueError("Only a failed job can be retried here")
             self.notice = ""
-            self.future = self.executor.submit(self._run, action, job_id, manual_input)
+            self.future = self.executor.submit(self._run, action, job_id, manual_input, render_mode)
             return {"message": "Run started. Progress updates automatically."}
 
-    def _run(self, action, job_id, manual_input=None):
+    def _run(self, action, job_id, manual_input=None, render_mode=None):
         try:
             runner = Pipeline(self.cfg)
             options = {"manual_input": manual_input} if manual_input else {}
+            if render_mode is not None:
+                options["render_mode"] = render_mode
             result = runner.retry(job_id) if action == "retry" else runner.create_run(
                 dry_run=action == "preview", fresh=True, **options)
             if result:
@@ -181,6 +206,9 @@ class Dashboard:
             self.notice = f"Run stopped ({type(error).__name__}). Check the job and run doctor."
 
     def snapshot(self):
+        from .motion import availability
+        from .render_settings import record as render_record
+        from .script_settings import record as script_record
         from .voice_settings import record
         cfg = self.cfg
         from .planning import load_plan
@@ -204,11 +232,17 @@ class Dashboard:
             folder = cfg.output_dir / job["id"]
             job["has_video"] = (folder / "final.mp4").is_file()
             job["has_cover"] = (folder / "cover.png").is_file()
+            job["research_progress"] = self.store.load(job["id"], "research_progress") if job["state"] == "RESEARCHING" else None
         upcoming = sorted(j.next_run_time.isoformat() for j in self.scheduler.get_jobs()
                           if j.id != "startup-plan" and getattr(j, "next_run_time", None))
         return {"now": datetime.now(zone).isoformat(), "started_at": self.started_at,
                 "auto_enabled": self.scheduler.state == 1, "busy": self.busy(), "notice": self.notice,
                 "voice_settings": record(cfg),
+                "render_settings": render_record(cfg),
+                "script_settings": script_record(cfg),
+                "script_providers": {"groq": {"model": cfg.groq_model, "key_present": bool(cfg.groq_api_key)},
+                                     "gemini": {"model": cfg.gemini_model, "key_present": bool(cfg.gemini_api_key)}},
+                "motion_renderer": availability(cfg),
                 "voice_preview": self.voice_result,
                 "voice_keys": {"gemini": bool(cfg.gemini_api_key.strip()), "elevenlabs": bool(cfg.elevenlabs_api_key.strip())},
                 "daily": {"attempts": len(daily), "uploaded": len(today_uploads),
@@ -247,7 +281,7 @@ class Dashboard:
         if not JOB_ID.fullmatch(job_id):
             raise ValueError("Invalid job")
         result = self.store.get(job_id)
-        for kind in ("request", "script", "research", "source_brief", "editorial", "content_package", "research_attempts", "media_assets", "media_license_audit", "validation", "youtube"):
+        for kind in ("request", "render_settings", "render_report", "script_settings", "script", "research", "source_brief", "editorial", "content_package", "research_attempts", "media_assets", "media_license_audit", "validation", "youtube"):
             value = self.store.load(job_id, kind)
             if kind == "media_assets" and value:
                 value = [{k: v for k, v in asset.items() if k != "path"} for asset in value]
@@ -301,10 +335,10 @@ def make_server(app, port):
                 match = re.fullmatch(r"/media/([a-f0-9]{16})/(final.mp4|cover.png)", path)
                 if match:
                     return self.media(*match.groups())
-                names = {"/": "index.html", "/app.js": "app.js", "/style.css": "style.css"}
+                names = {"/": "index.html", "/app.js": "app.js", "/ui.mjs": "ui.mjs", "/style.css": "style.css"}
                 if path in names:
                     file = Path(__file__).parent / "web" / names[path]
-                    content_type = {".html": "text/html", ".js": "text/javascript", ".css": "text/css"}[file.suffix]
+                    content_type = {".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css"}[file.suffix]
                     return self.send(200, file.read_bytes(), content_type + "; charset=utf-8")
                 return self.send(404, {"error": "Not found"})
             except (ValueError, FileNotFoundError):
@@ -357,6 +391,7 @@ def make_server(app, port):
                 return self.send(403, {"error": "Open the dashboard on localhost to use controls"})
             if self.path != "/api/action":
                 return self.send(404, {"error": "Not found"})
+            value = {}
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 0 < length <= 32768:
@@ -370,11 +405,13 @@ def make_server(app, port):
                     except (RuntimeError, ValueError, TypeError) as error:
                         return self.send(409, {"error": error.errors()[0]["msg"] if isinstance(error, ValidationError) else str(error)[:350]})
                 else:
-                    result = app.action(value.get("action"), value.get("job_id"), value.get("manual_input"))
+                    result = app.action(value.get("action"), value.get("job_id"), value.get("manual_input"), value.get("render_mode"))
                 return self.send(200, result)
             except ValidationError as error:
                 return self.send(409, {"error": error.errors()[0]["msg"]})
-            except (ValueError, TypeError):
+            except (ValueError, TypeError) as error:
+                if isinstance(value, dict) and value.get("action") in {"save_render", "save_script"}:
+                    return self.send(409, {"error": str(error)[:350]})
                 return self.send(409, {"error": "Action unavailable. A run may be active, or the job is not retryable."})
             except Exception:
                 return self.send(500, {"error": "Action failed; run doctor"})

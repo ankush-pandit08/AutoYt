@@ -15,7 +15,7 @@ def test_ollama_actionable_failures(cfg, monkeypatch, status, text, expected):
         calls.append(kwargs)
         return httpx.Response(status, text=text, request=httpx.Request("POST", "http://localhost"))
     monkeypatch.setattr(httpx, "post", post)
-    monkeypatch.setattr("autoyt.ai.time.sleep", lambda _: None)
+    monkeypatch.setattr("autoyt.limits.time.sleep", lambda _: None)
     with pytest.raises(RuntimeError, match=expected):
         LLM(cfg).structured(Audit, "test", {})
     assert len(calls) == (3 if status == 503 else 1)

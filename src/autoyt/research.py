@@ -12,6 +12,7 @@ import trafilatura
 from pydantic import BaseModel, Field, create_model
 from tld import get_fld
 
+from . import limits
 from .discovery import MAX_STORY_AGE_SECONDS, similarity, words
 from .models import Claim, Evidence, Research, Source
 from .store import write_json
@@ -360,6 +361,7 @@ def publication_hint(topic):
         getattr(topic, "source", "")).hostname == "trends.google.com" else topic.published_at
 
 
+@limits.bounded_research
 def research(cfg, web, llm, topic, candidates, folder=None):
     evergreen = getattr(topic, "content_kind", "news") == "evergreen"
     urls = [(topic.url, publication_hint(topic)), *[(u, None) for u in topic.related_urls if u != topic.url]]
@@ -370,6 +372,7 @@ def research(cfg, web, llm, topic, candidates, folder=None):
     retrievals = []
     index = 0
     while index < len(urls) and index < 16 and len(sources) < 6:
+        limits.progress("Checking supporting source " + str(index + 1))
         url, hint = urls[index]
         index += 1
         if url in seen:
@@ -388,6 +391,8 @@ def research(cfg, web, llm, topic, candidates, folder=None):
             if not evergreen:
                 urls.extend((link, None) for link in official_links(html, url, topic.title, cfg)
                             if link not in seen and not any(link == pending for pending, _ in urls))
+        except RuntimeError:
+            raise
         except Exception as error:
             # Persist only controlled diagnostics; HTTP exception strings may contain credentials.
             import httpx

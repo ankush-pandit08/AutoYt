@@ -14,6 +14,10 @@ log = logging.getLogger(__name__)
 
 def choose_media(cfg, web, script):
     """Local assets require an explicit license manifest. Generic stock is labelled in the video."""
+    if cfg.render_mode == "motion_graphics":
+        return [{"kind": "graphics", "license": "Original AutoYT graphics", "query": scene.visual_query,
+                 "attribution": "Original explanatory motion graphics", "path": None, "source_url": None}
+                for scene in script.scenes]
     local = []
     if cfg.local_media_manifest.is_file():
         local = json.loads(cfg.local_media_manifest.read_text(encoding="utf-8"))
