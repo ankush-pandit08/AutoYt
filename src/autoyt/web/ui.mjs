@@ -3,7 +3,11 @@ export const TERMINAL = new Set(['PUBLISHED','AWAITING_REVIEW','FAILED','SKIPPED
 export const STAGES = ['Find topic','Research','Write script','Voiceover','Find visuals','Render','Quality check','Upload'];
 export const MODE_NAMES = {normal:'Normal',motion_graphics:'Motion Graphics',hybrid:'Hybrid'};
 export const nice = value => value==='openrouter'?'OpenRouter':String(value ?? '').replaceAll('_',' ').toLowerCase().replace(/^./, c=>c.toUpperCase());
-export const sameSelection = (a,b) => !!a && !!b && Object.keys(a).length===Object.keys(b).length && Object.keys(a).every(key=>a[key]===b[key]);
+export function sameSelection(a,b) {
+  if(a===b) return true;
+  if(!a || !b || typeof a!=='object' || typeof b!=='object' || Array.isArray(a)!==Array.isArray(b)) return false;
+  return Object.keys(a).length===Object.keys(b).length && Object.keys(a).every(key=>Object.hasOwn(b,key) && sameSelection(a[key],b[key]));
+}
 
 export function jobStatus(job) {
   if(job.state==='READY_TO_UPLOAD') return {label:job.dry_run ? 'Preview ready' : 'Ready for upload',tone:'neutral'};
