@@ -42,22 +42,24 @@ def test_free_request_and_structured_validation(cfg, monkeypatch):
 @pytest.mark.parametrize("status,expected", [(401, "access denied"), (402, "paid fallback"),
     (403, "access denied"), (404, "endpoint"), (503, "endpoint")])
 def test_errors_are_bounded_and_sanitized(cfg, monkeypatch, status, expected):
-    calls = setup(cfg, monkeypatch, [response(status, error={"message": "private-test-key"})])
+    attempts = 4 if status == 503 else 1
+    calls = setup(cfg, monkeypatch, [response(status, error={"message": "private-test-key"}) for _ in range(attempts)])
     with pytest.raises(RuntimeError, match=expected) as error:
         OpenRouter(cfg).structured(Audit, "test", {})
     assert "private-test-key" not in str(error.value)
-    assert len(calls) == 1
+    assert len(calls) == attempts
 
 
 @pytest.mark.parametrize("error,expected", [
     ({"message": "daily limit private-test-key"}, "daily free-request allowance"),
     ({"metadata": {"provider_name": "private-test-key"}}, "provider is rate-limited")])
 def test_account_and_upstream_limits_are_distinct(cfg, monkeypatch, error, expected):
-    calls = setup(cfg, monkeypatch, [response(429, error=error)])
+    attempts = 1 if "daily" in error.get("message", "") else 4
+    calls = setup(cfg, monkeypatch, [response(429, error=error) for _ in range(attempts)])
     with pytest.raises(RuntimeError, match=expected) as caught:
         OpenRouter(cfg).structured(Audit, "test", {})
     assert "private-test-key" not in str(caught.value)
-    assert len(calls) == 1
+    assert len(calls) == attempts
 
 
 def test_missing_key_and_paid_frozen_model_never_call_network(cfg, monkeypatch):

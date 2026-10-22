@@ -213,3 +213,16 @@ def test_official_research_prompt_is_bounded(research_data):
         raise RuntimeError("Bounded prompt checked")
     with pytest.raises(RuntimeError,match="Bounded prompt checked"):
         topic_research.select_official_claims(SimpleNamespace(structured=check),[source],"processor architecture")
+
+
+def test_audit_context_preserves_quotes_deep_in_long_sources(research_data):
+    evidence = research_data.model_copy(deep=True)
+    for source in evidence.sources:
+        source.text = "Unrelated introduction. " * 1000 + source.text + " More background." * 1000
+    context = topic_research.audit_context(evidence)
+    assert sum(len(s["text"]) for s in context) < 6000
+    by_url = {s["url"]: s["text"] for s in context}
+    for claim in evidence.claims:
+        for quote in claim.evidence:
+            assert quote.quote in by_url[quote.source_url]
+    assert len(evidence.sources[0].text) > 20000

@@ -57,7 +57,7 @@ def test_gemini_overload_is_transient_and_has_bounded_research_retries(cfg, monk
     with limits.research_budget(240), pytest.raises(RuntimeError, match="TRANSIENT: Gemini service unavailable.*503") as caught:
         LLM(cfg).structured(Audit, "test", {})
     assert "test-secret" not in str(caught.value)
-    assert len(calls) == 2
+    assert len(calls) == 4
 
 
 @pytest.mark.parametrize("model,level,expected", [
