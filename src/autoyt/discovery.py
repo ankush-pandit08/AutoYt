@@ -58,6 +58,12 @@ def similarity(a, b):
     return len(wa & wb) / max(1, min(len(wa), len(wb)))
 
 
+def exclude_rejected(candidates, history):
+    blocked_urls = set(history["urls"])
+    return [topic for topic in candidates if topic.url not in blocked_urls
+            and not duplicate(topic.title, history["titles"])]
+
+
 def duplicate(title, previous):
     title_tokens = normalized(title)
     return bool(title_tokens) and any(

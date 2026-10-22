@@ -42,7 +42,7 @@ def test_new_run_skips_rejected_stories_but_explicit_retry_rechecks(cfg, monkeyp
     second = pipeline.create_run()
     assert pipeline.store.get(second)["state"] == "SKIPPED"
     assert len(checked) == 2
-    assert "six hours" in pipeline.store.get(second)["error"]
+    assert "skipped or failed" in pipeline.store.get(second)["error"]
     pipeline.retry(first)
     assert len(checked) > 2
     assert checked[2] == candidates[-1].title

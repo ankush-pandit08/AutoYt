@@ -93,6 +93,11 @@ class Pipeline:
                     folder.mkdir(parents=True, exist_ok=True)
                     if slot:
                         self._save(job_id, folder, "morning_plan", {"date": slot[:10]})
+                    if not discovery.exclude_rejected([selected], self.store.rejected_topic_history(job_id)):
+                        self._save(job_id, folder, "topic", selected)
+                        self.store.update(job_id, "SKIPPED", topic=selected.title,
+                                          error="This planned topic previously skipped or failed. Choose a new topic.")
+                        return job_id
                     if discovery.duplicate(selected.title, self.store.recent_topics(
                             self.cfg.topic_dedup_days, self.cfg.youtube_privacy)) or (not prepared.get("source_brief") and discovery.repeated_insight(
                                 [c.claim for c in evidence.claims], self.store.recent_research(
@@ -205,10 +210,8 @@ class Pipeline:
                                       and (db.load(job_id, "request") or {}).get("fresh") else
                                       discovery.discover(cfg, self.web))
                         previous = db.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
-                        # A deliberate manual run may recheck failed evidence immediately.
-                        # Automatic runs retain the cooldown; published topics stay blocked.
-                        if not (db.load(job_id, "request") or {}).get("fresh") and not request:
-                            previous += db.recent_research_rejections()
+                        if not job["retries"]:
+                            candidates = discovery.exclude_rejected(candidates, db.rejected_topic_history(job_id))
                         candidates = [t for t in candidates if not discovery.duplicate(t.title, previous)]
                         if not request and (cfg.prefer_tech_insights or cfg.topic_focus == "ai_coding"):
                             candidates = discovery.rank_insights(candidates, db.recent_topics(
@@ -221,7 +224,7 @@ class Pipeline:
                                 "No recent, nonduplicate YouTube technology video matched your topic. "
                                 "Add a YouTube video link or choose a different topic." if request else
                                 "No unused technology topics from your selected creators in the last seven days. "
-                                "Published stories are excluded; automatic runs also rest failed research for six hours. "
+                                "Published stories and previously skipped or failed topics are excluded. "
                                 "Use your own script or try a different creator video link. Google Trends and RSS fallbacks are disabled."))
                             return job_id
                         if request:
@@ -230,8 +233,8 @@ class Pipeline:
                                       "No alternative topic was selected.")
                             return job_id
                         db.update(job_id, "SKIPPED", error="No fresh, relevant, nonduplicate technology topic; "
-                                  "stories rejected by evidence checks rest for six hours. Retry a saved run "
-                                  "to recheck its story sooner.")
+                                  "Previously skipped or failed topics are excluded. Retry a saved run "
+                                  "only if you deliberately want to recheck its topic.")
                         return job_id
                     if not saved:
                         self._save(job_id, folder, "candidates", [t.model_dump(mode="json") for t in candidates])
@@ -254,6 +257,8 @@ class Pipeline:
                             previous = [t for t in db.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
                                         if t != selected.title]
                             choices = [selected, *[t for t in candidates if t.url != selected.url]]
+                            if not job["retries"]:
+                                choices = discovery.exclude_rejected(choices, db.rejected_topic_history(job_id))
                             choices = [t for t in choices if not discovery.duplicate(t.title, previous)][:cfg.research_candidate_limit]
                             failures = []
                             for candidate in choices:
@@ -264,7 +269,7 @@ class Pipeline:
                                             db.recent_research(cfg.topic_dedup_days, job_id, cfg.youtube_privacy)):
                                         raise ValueError("This supported story was already covered; trying another creator topic")
                                 except ValueError as error:
-                                    failures.append({"topic": candidate.title, "reason": str(error)[:300]})
+                                    failures.append({"topic": candidate.title, "url": candidate.url, "reason": str(error)[:300]})
                                     self._save(job_id, folder, "research_attempts", failures)
                                     continue
                                 self._save(job_id, folder, "topic", candidate)
@@ -295,6 +300,8 @@ class Pipeline:
                             selected = Topic.model_validate(db.load(job_id, "topic"))
                             selected = next((t for t in candidates if t.url == selected.url), selected)
                             choices = [selected, *[t for t in candidates if t.url != selected.url]]
+                            if not job["retries"]:
+                                choices = discovery.exclude_rejected(choices, db.rejected_topic_history(job_id))
                             previous = db.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
                             previous = [title for title in previous if title != selected.title]
                             if not request and (cfg.prefer_tech_insights or cfg.topic_focus == "ai_coding"):
@@ -318,7 +325,7 @@ class Pipeline:
                                 except ValueError as error:
                                     retrieval_path = folder / "source_retrievals.json"
                                     retrievals = json.loads(retrieval_path.read_text(encoding="utf-8")) if retrieval_path.is_file() else []
-                                    failures.append({"topic": candidate.title, "reason": str(error)[:300],
+                                    failures.append({"topic": candidate.title, "url": candidate.url, "reason": str(error)[:300],
                                                      "sources": retrievals})
                                     self._save(job_id, folder, "research_attempts", failures)
                                     log.info("Research candidate rejected: %s", str(error)[:150])

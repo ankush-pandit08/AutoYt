@@ -38,9 +38,8 @@ def prepare_day(cfg, moment=None):
         if not plan:
             # Persist discovery once. An interrupted preparation resumes this same snapshot.
             candidates = discovery.discover(cfg, web)
+            candidates = discovery.exclude_rejected(candidates, store.rejected_topic_history())
             previous = store.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
-            if cfg.content_mode != "youtube_insights":
-                previous += store.recent_research_rejections()
             if cfg.prefer_tech_insights or cfg.topic_focus == "ai_coding":
                 candidates = discovery.rank_insights(candidates, store.recent_topics(
                     cfg.topic_dedup_days, cfg.youtube_privacy), cfg.topic_focus)
@@ -66,6 +65,8 @@ def prepare_day(cfg, moment=None):
                 folder = path.parent / (path.stem + "-research") / str(plan["cursor"])
                 folder.mkdir(parents=True, exist_ok=True)
                 try:
+                    if not discovery.exclude_rejected([topic], store.rejected_topic_history()):
+                        raise ValueError("This topic previously skipped or failed")
                     if cfg.content_mode == "youtube_insights":
                         source = youtube_content.research_brief(cfg, web, llm, topic, candidates, folder)
                         planned = [e["source_brief"]["evidence"] for e in plan["entries"]

@@ -150,6 +150,29 @@ class Store:
             return list(dict.fromkeys(attempt["topic"] for row in rows for attempt in json.loads(row[0])
                                       if isinstance(attempt, dict) and attempt.get("topic")))
 
+    def rejected_topic_history(self, excluding=""):
+        """New runs never automatically revisit skipped/failed topics, including previews."""
+        titles, urls = set(), set()
+        def remember(value):
+            if isinstance(value, str):
+                if value.strip():
+                    titles.add(value)
+            elif isinstance(value, dict):
+                remember(value.get("title") or value.get("topic"))
+                if value.get("url"):
+                    urls.add(value["url"])
+        with self.connect() as db:
+            for row in db.execute("SELECT topic FROM video_jobs WHERE state IN ('FAILED','SKIPPED') AND id!=?",
+                                  (excluding,)):
+                remember(row[0])
+            for row in db.execute("SELECT a.kind,a.payload FROM artifacts a JOIN video_jobs j ON j.id=a.job_id "
+                                  "WHERE j.id!=? AND (a.kind='research_attempts' OR "
+                                  "(a.kind='topic' AND j.state IN ('FAILED','SKIPPED')))", (excluding,)):
+                value = json.loads(row["payload"])
+                for item in value if row["kind"] == "research_attempts" else [value]:
+                    remember(item)
+        return {"titles": sorted(titles), "urls": sorted(urls)}
+
     def recent_scripts(self, days, excluding, visibility=None):
         return self.recent_artifacts("script", days, excluding, visibility)
 
