@@ -38,6 +38,8 @@ class Dashboard:
         cfg = apply_script(cfg)
         self.cfg = cfg
         cfg.prepare()
+        from .schedule_settings import initialize
+        self.cfg = cfg = initialize(cfg)
         self.store = Store(cfg.database_path)
         self.state_path = cfg.database_path.parent / "dashboard-state.json"
         self.token = secrets.token_urlsafe(32)
@@ -143,6 +145,17 @@ class Dashboard:
 
     def action(self, action, job_id=None, manual_input=None, render_mode=None):
         from . import render_settings
+        if action == "save_schedule":
+            from . import schedule_settings
+            if not isinstance(manual_input, dict) or set(manual_input) != {"selection", "version"}:
+                raise ValueError("Choose six automatic times, timezone and version")
+            with self.guard:
+                self.cfg, saved = schedule_settings.save(self.cfg, manual_input["selection"], manual_input["version"])
+                # Replacing future timers does not interrupt a running worker or resume paused auto mode.
+                self.scheduler.remove_all_jobs()
+                configure(self.scheduler, self.cfg)
+                return {"message": "Schedule saved. Automatic mode allows up to six runs per day; manual runs are unlimited.",
+                        "schedule_settings": saved}
         if action == "save_script":
             from . import script_settings
             if not isinstance(manual_input, dict) or set(manual_input) != {"selection", "version"}:
@@ -208,6 +221,7 @@ class Dashboard:
     def snapshot(self):
         from .motion import availability
         from .render_settings import record as render_record
+        from .schedule_settings import record as schedule_record
         from .script_settings import record as script_record
         from .voice_settings import record
         cfg = self.cfg
@@ -217,7 +231,7 @@ class Dashboard:
         today = datetime.now(zone).date()
         jobs = self.store.jobs()
         with self.store.connect() as db:
-            all_jobs = [dict(row) for row in db.execute("SELECT created_at,state,dry_run FROM video_jobs")]
+            all_jobs = [dict(row) for row in db.execute("SELECT created_at,state,dry_run,slot FROM video_jobs")]
             uploads = [dict(row) for row in db.execute("SELECT job_id,video_id,privacy,uploaded_at FROM youtube_uploads")]
             events = [dict(row) for row in db.execute(
                 "SELECT job_id,created_at,state,message FROM application_events ORDER BY id DESC LIMIT 60")]
@@ -233,19 +247,31 @@ class Dashboard:
             job["has_video"] = (folder / "final.mp4").is_file()
             job["has_cover"] = (folder / "cover.png").is_file()
             job["research_progress"] = self.store.load(job["id"], "research_progress") if job["state"] == "RESEARCHING" else None
-        upcoming = sorted(j.next_run_time.isoformat() for j in self.scheduler.get_jobs()
-                          if j.id != "startup-plan" and getattr(j, "next_run_time", None))
+        automatic_attempts = sum(j["slot"] is not None for j in daily)
+        upcoming = []
+        for scheduled in self.scheduler.get_jobs():
+            if scheduled.id not in cfg.schedule_times.split(",") or not getattr(scheduled, "next_run_time", None):
+                continue
+            due = scheduled.next_run_time
+            if automatic_attempts >= cfg.max_videos_per_day and due.astimezone(zone).date() == today:
+                due = scheduled.trigger.get_next_fire_time(None, datetime.now(zone).replace(
+                    hour=23, minute=59, second=59, microsecond=999999))
+            if due:
+                upcoming.append(due.isoformat())
+        upcoming.sort()
         return {"now": datetime.now(zone).isoformat(), "started_at": self.started_at,
                 "auto_enabled": self.scheduler.state == 1, "busy": self.busy(), "notice": self.notice,
                 "voice_settings": record(cfg),
                 "render_settings": render_record(cfg),
                 "script_settings": script_record(cfg),
+                "schedule_settings": schedule_record(cfg),
                 "script_providers": {"groq": {"model": cfg.groq_model, "key_present": bool(cfg.groq_api_key)},
-                                     "gemini": {"model": cfg.gemini_model, "key_present": bool(cfg.gemini_api_key)}},
+                                     "gemini": {"model": cfg.gemini_model, "key_present": bool(cfg.gemini_api_key)},
+                                     "openrouter": {"model": cfg.openrouter_model, "key_present": bool(cfg.openrouter_api_key), "free_only": True}},
                 "motion_renderer": availability(cfg),
                 "voice_preview": self.voice_result,
                 "voice_keys": {"gemini": bool(cfg.gemini_api_key.strip()), "elevenlabs": bool(cfg.elevenlabs_api_key.strip())},
-                "daily": {"attempts": len(daily), "uploaded": len(today_uploads),
+                "daily": {"attempts": len(daily), "auto_attempts": automatic_attempts, "uploaded": len(today_uploads),
                           "failed": sum(j["state"] == "FAILED" for j in daily), "limit": cfg.max_videos_per_day},
                 "settings": {"timezone": cfg.timezone, "slots": cfg.schedule_times.split(","),
                              "daily_script_batch": cfg.daily_script_batch, "morning_plan_time": cfg.morning_plan_time,
@@ -253,8 +279,7 @@ class Dashboard:
                              "language": cfg.narration_language, "voice": cfg.tts_voice,
                              "tts_engine": cfg.tts_engine,
                              "content_mode": cfg.content_mode,
-                             "model": (cfg.gemini_model if cfg.llm_provider == "gemini" else
-                                       cfg.groq_model if cfg.llm_provider == "groq" else cfg.ollama_model),
+                             "model": getattr(cfg, cfg.llm_provider + "_model"),
                              "pixabay": bool(cfg.pixabay_api_key),
                              "public_images": cfg.enable_public_images,
                              "creator_reference_count": len(cfg.creator_channel_ids),
@@ -410,7 +435,7 @@ def make_server(app, port):
             except ValidationError as error:
                 return self.send(409, {"error": error.errors()[0]["msg"]})
             except (ValueError, TypeError) as error:
-                if isinstance(value, dict) and value.get("action") in {"save_render", "save_script"}:
+                if isinstance(value, dict) and value.get("action") in {"save_render", "save_script", "save_schedule"}:
                     return self.send(409, {"error": str(error)[:350]})
                 return self.send(409, {"error": "Action unavailable. A run may be active, or the job is not retryable."})
             except Exception:

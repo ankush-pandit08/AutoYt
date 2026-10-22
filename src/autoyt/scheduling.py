@@ -1,5 +1,5 @@
-from pathlib import Path
 from datetime import datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import portalocker
@@ -10,6 +10,8 @@ from .pipeline import Pipeline
 
 
 def configure(scheduler, cfg):
+    from .schedule_settings import apply
+    cfg = apply(cfg)
     if Path(".server-managed").is_file():
         raise RuntimeError("LoopYt runs on the OmniKit server. This Windows scheduler is disabled.")
     if cfg.daily_script_batch:
@@ -50,9 +52,13 @@ def slot_key(cfg, moment):
 
 
 def scheduled_run(cfg, expected=None, moment=None):
+    from .schedule_settings import apply
+    cfg = apply(cfg).model_copy(update={"max_videos_per_day": 6})
     moment = moment or datetime.now(ZoneInfo(cfg.timezone))
     local = moment.astimezone(ZoneInfo(cfg.timezone))
     slot = expected or local.strftime("%H:%M")
+    if slot not in cfg.schedule_times.split(","):
+        return None
     hour, minute = map(int, slot.split(":"))
     due = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
     # Skip old missed runs, even if called manually with an obsolete expected slot.

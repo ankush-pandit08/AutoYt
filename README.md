@@ -1,14 +1,18 @@
 # AutoYT
 
-Local motion graphics are available in **Normal**, **Motion Graphics**, and **Hybrid** modes. The dashboard also offers **Groq** or **Gemini** for script generation, independently of voice settings. See [MOTION_GRAPHICS.md](MOTION_GRAPHICS.md) for setup, mode behavior, previews and licensing, and [the implementation plan](docs/motion-graphics-plan.md) for acceptance criteria.
+Local motion graphics are available in **Normal**, **Motion Graphics**, and **Hybrid** modes. The dashboard also offers **Groq**, **Gemini**, or **OpenRouter** for script generation, independently of voice settings. See [MOTION_GRAPHICS.md](MOTION_GRAPHICS.md) for setup, mode behavior, previews and licensing, and [the implementation plan](docs/motion-graphics-plan.md) for acceptance criteria.
 
 Personal, local automation for **one** technology YouTube channel. Python, SQLite, optional Ollama or Gemini/Groq API, local or Gemini narration and FFmpeg. No account system, payments, queue service, or cloud hosting. An optional dashboard runs on localhost using Python's standard library.
 
 YouTube technology discovery → original script → voice → relevant licensed stock or original explanatory graphics → animated captions → cover → media validation → upload with the configured **private or public** visibility.
 
-**Current default: `CONTENT_MODE=youtube_insights`.** Topics come only from YouTube Data API Science & Technology popular charts and, when needed, recent technology videos ordered by views. Ranking also considers views per hour and freshness within seven days; these are popularity signals, not proof that a story is true. Public titles/descriptions are cached for 30 minutes and used to write original scripts. Videos/transcripts are not downloaded or copied. Independent fact verification, the two-publisher requirement and evidence-quotation audits are disabled in this mode; saved packages explicitly say `fact_check_status=not_checked`. English male Kokoro narration, duplicate prevention, license checks, audio/duration checks and upload recovery remain active. Existing YouTube OAuth credentials are reused; no additional discovery key is required. The morning script plan and manual topic/script box both support this mode. Optional manual topic references must be YouTube video links; a supplied script can run directly without source research.
+**Current default: `CONTENT_MODE=youtube_insights`.** Selected YouTube creators remain the first topic choice. Public Google News RSS search feeds also supply recent AI, LLM, coding, software, hardware and other technology developments from the last seven days when creator topics are exhausted. No extra API key is needed; set `GOOGLE_NEWS_ENABLED=false` to disable these feeds. New runs exclude used, skipped and failed topics across both sources. Creator metadata and RSS headlines are topic references only: supporting article research and claim checks must establish usable facts before script generation. Google News links are saved separately from the actual articles used as evidence. One unavailable discovery service does not block usable topics from the other; if neither service can be checked, the app reports a temporary discovery error. Videos/transcripts are not downloaded or copied. Local narration, duplicate prevention, license checks, audio/duration checks and upload recovery remain active. Manual source links in this mode still accept YouTube videos, and supplied scripts can run directly without source research. Existing saved jobs retain their source selection; use a new run to discover new topics.
 
 `CONTENT_MODE=verified_news` retains the older RSS/Google Trends and independent-evidence workflow described below. It is not a fallback when YouTube is unavailable. Old failed research runs retain their saved sources; start a new run to use the YouTube workflow. The existing once-a-day plan is preserved until the next morning; switching modes does not regenerate videos or upload anything automatically.
+
+## OpenRouter scripts
+
+Add `OPENROUTER_API_KEY` to your local ignored `.env`, restart the dashboard, then select **OpenRouter** under **Script generation** and save. The default `OPENROUTER_MODEL=google/gemma-4-31b-it:free` uses JSON output with local schema validation. Only explicit `:free` models are accepted; requests enforce zero prompt/completion pricing and disable paid fallback. Free endpoint availability and request quotas apply. An upstream provider rate limit can occur even with unused OpenRouter daily allowance. Existing saved jobs retain their original provider; start a new job to use your selection. Voice settings are independent.
 
 ## Start on Windows
 
@@ -28,7 +32,7 @@ The checked-in `.env.example` uses Kokoro. The local `.env` may select the Windo
 
 Run `powershell -ExecutionPolicy Bypass -File scripts/start-autoyt.ps1` on Windows, or `python -m autoyt dashboard` on Linux. Open **http://127.0.0.1:8765**. Monitor daily results, live stages, failures, previews, sources and media credits; pause/resume the scheduler or retry a failed job. Pause state survives restart. Browser closure does not stop the process. See [DASHBOARD.md](DASHBOARD.md) and [MEDIA_LICENSES.md](MEDIA_LICENSES.md).
 
-The default three slots are **08:00, 14:00 and 20:00 Asia/Kolkata**. Three is the automatic-run attempt limit; manual Run now jobs have no app daily cap. It is not a guarantee of three uploads; failed quality checks never publish.
+The default six slots run from **09:30 to 18:30 Asia/Kolkata** and can be edited in the dashboard. Six is the automatic-run attempt limit; manual Run now jobs have no app daily cap. It is not a guarantee of six uploads; failed quality checks never publish.
 
 ## Commands
 

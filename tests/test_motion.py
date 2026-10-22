@@ -142,7 +142,7 @@ def test_script_provider_selection_is_separate_from_voice_and_hides_keys(cfg):
         import json
         snapshot = json.dumps(app.snapshot())
         assert "test-groq-secret" not in snapshot and "test-gemini-secret" not in snapshot
-        assert set(app.snapshot()["script_providers"]) == {"groq", "gemini"}
+        assert set(app.snapshot()["script_providers"]) == {"groq", "gemini", "openrouter"}
         with pytest.raises(ValueError, match="changed"):
             script_settings.save(cfg, {"provider": "groq"}, 0)
         cfg.groq_api_key = ""

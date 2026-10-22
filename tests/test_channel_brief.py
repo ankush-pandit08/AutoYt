@@ -13,8 +13,8 @@ from autoyt.research import extract, publication_hint, select_claims
 
 def test_channel_schedule_defaults():
     cfg = Settings(_env_file=None)
-    assert cfg.schedule_times == "08:00,14:00,20:00"
-    assert cfg.max_videos_per_day == 3
+    assert cfg.schedule_times == "09:30,11:18,13:06,14:54,16:42,18:30"
+    assert cfg.max_videos_per_day == 6
 
 
 def test_evergreen_documents_do_not_invent_publication_dates(cfg, monkeypatch):

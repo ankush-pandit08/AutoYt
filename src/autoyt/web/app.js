@@ -1,12 +1,15 @@
-import {TERMINAL,STAGES,MODE_NAMES,nice,jobStatus,filterJobs,runIntent,validateManual,confirmation,evidenceFor,mergeSnapshot,sameSelection} from './ui.mjs';
+import {TERMINAL,STAGES,MODE_NAMES,nice,jobStatus,filterJobs,runIntent,validateManual,confirmation,evidenceFor,mergeSnapshot,sameSelection,nextRunCountdown} from './ui.mjs';
 
 const $=id=>document.getElementById(id);
 const esc=value=>String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const formIds={script:['scriptModelForm','scriptModelMessage','scriptSaveState','saveScriptModel','resetScript'],render:['renderForm','renderMessage','renderSaveState','saveRender','resetRender'],voice:['voiceForm','voiceMessage','voiceSaveState','saveVoice','resetVoice']};
+formIds.schedule=['scheduleForm','scheduleMessage','scheduleSaveState','saveSchedule','resetSchedule'];
 const forms=Object.fromEntries(Object.keys(formIds).map(key=>[key,{initialized:false,dirty:false,saving:false,version:null,base:null}]));
 let state=null,token=null,connected=false,refreshPromise=null,requestPending=false,pending=null,pendingContext=null;
+let serverClockOffset=0;
 let jobsSignature='',toastTimer=null,detailId=null,detailRequest=0,detailJob=null;
 let voiceLoading=false,voicePage=null,voiceTestingId=null,voiceSubmitting=false,voiceProvider='';
+let voiceCatalogRequested=false,voiceCatalogLoaded=false;
 const draftVoices={};
 const time=value=>value ? new Date(value).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',timeZone:state?.settings.timezone || 'Asia/Kolkata'}) : '—';
 const date=value=>value ? new Date(value).toLocaleDateString('en-IN',{day:'numeric',month:'short',timeZone:state?.settings.timezone || 'Asia/Kolkata'}) : '—';
@@ -17,19 +20,19 @@ const canAct=()=>connected && !!token && !!state;
 const badge=job=>{const status=jobStatus(typeof job==='string' ? {state:job}:job);return `<span class="badge ${status.tone}">${esc(status.label)}</span>`;};
 const link=(url,label)=>{try{if(new URL(url).protocol!=='https:') return esc(label);}catch{return esc(label);}return `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)} ↗</a>`;};
 
-async function api(path,options={}) {
-  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
+async function api(path,options={},timeoutMs=15000) {
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);
   try {
     const response=await fetch(path,{...options,cache:'no-store',signal:controller.signal});
     let data;try{data=await response.json();}catch{throw new Error('The server returned an unreadable response. Reconnect and try again.');}
     if(!response.ok) throw new Error(data.error || `Request failed (${response.status}).`);
     return data;
   } catch(error) {
-    if(error.name==='AbortError') throw new Error('Request timed out. Check the video library before starting another run.');
+    if(error.name==='AbortError') throw new Error(timeoutMs===25000?'Voice list timed out. Use Refresh voices to try again.':'Request timed out. Check the video library before starting another run.');
     throw error;
   } finally {clearTimeout(timer);}
 }
-const post=body=>api('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-AutoYT-Token':token},body:JSON.stringify(body)});
+const post=body=>api('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-AutoYT-Token':token},body:JSON.stringify(body)},body.action==='voice_list'?25000:15000);
 function message(key,text='',tone='') {const el=$(formIds[key][1]);el.textContent=text;el.dataset.tone=tone;}
 function toast(text,tone='success') {
   clearTimeout(toastTimer);$('toastText').textContent=text;$('toast').dataset.tone=tone;$('toast').setAttribute('role',tone==='error'?'alert':'status');$('toast').hidden=false;
@@ -39,13 +42,15 @@ $('dismissToast').onclick=()=>{$('toast').hidden=true;clearTimeout(toastTimer);}
 $('reconnect').onclick=()=>refresh();
 
 function settingValue(key) {
+  if(key==='schedule') return {times:Array.from({length:6},(_,i)=>$('scheduleTime'+(i+1)).value),timezone:$('scheduleTimezone').value.trim()};
   if(key==='script') return {provider:$('scriptProvider').value};
   if(key==='render') return {render_mode:$('renderMode').value,render_fallback:$('renderFallback').checked};
   return {provider:$('voiceProvider').value,language:$('scriptLanguage').value,
     voice:$('voiceProvider').value==='elevenlabs' ? $('elevenVoice').value:$('localVoice').value.trim()};
 }
 function applySetting(key,value) {
-  if(key==='script') $('scriptProvider').value=value.provider;
+  if(key==='schedule') {value.times.forEach((time,i)=>$('scheduleTime'+(i+1)).value=time);$('scheduleTimezone').value=value.timezone;}
+  else if(key==='script') $('scriptProvider').value=value.provider;
   else if(key==='render') {$('renderMode').value=value.render_mode;$('renderFallback').checked=value.render_fallback;}
   else {
     Object.assign(draftVoices,state.voice_settings.voices);
@@ -55,7 +60,7 @@ function applySetting(key,value) {
   }
 }
 function syncForm(key,force=false) {
-  const form=forms[key],record=state[`${key==='script'?'script':key==='render'?'render':'voice'}_settings`];
+  const form=forms[key],record=state[`${key}_settings`];
   if(!record) return;
   if(force || (!form.dirty && !form.saving && (!form.initialized || record.version!==form.version))) {
     applySetting(key,record.selection);Object.assign(form,{initialized:true,dirty:false,version:record.version,base:structuredClone(record.selection)});
@@ -79,7 +84,7 @@ function updateControls() {
   for(const key of Object.keys(forms)) {
     const form=forms[key],ids=formIds[key];
     $(ids[3]).disabled=unavailable || !form.dirty || form.saving;
-    $(ids[3]).textContent=form.saving?'Saving…':{script:'Save script provider',render:'Save video style',voice:'Save voice settings'}[key];
+    $(ids[3]).textContent=form.saving?'Saving…':{script:'Save script provider',render:'Save video style',voice:'Save voice settings',schedule:'Save schedule'}[key];
     $(ids[4]).disabled=unavailable || !form.dirty || form.saving;
     $(ids[0]).querySelectorAll('input,select').forEach(el=>el.disabled=unavailable || form.saving);
     $(ids[0]).setAttribute('aria-busy',String(form.saving));
@@ -88,6 +93,7 @@ function updateControls() {
   $('testVoice').disabled=voiceUnavailable;
   $('testVoice').textContent=voiceSubmitting || voiceTestingId ? 'Generating sample…':'Test voice';
   const missingEleven=state && !state.voice_keys?.elevenlabs;
+  $('elevenVoice').disabled=unavailable || voiceLoading || forms.voice.saving || missingEleven;
   $('loadVoices').disabled=$('moreVoices').disabled=unavailable || voiceLoading || forms.voice.saving || missingEleven;
   const changed=pendingContext && state && (pendingContext.script!==state.script_settings.version || pendingContext.voice!==state.voice_settings.version || pendingContext.visibility!==state.settings.visibility || pendingContext.uploads!==state.settings.uploads_enabled || pendingContext.server!==state.started_at);
   $('confirmAction').disabled=unavailable || busy() || !!changed;
@@ -99,9 +105,10 @@ async function saveSetting(key) {
   const form=forms[key],element=$(formIds[key][0]);if(!element.reportValidity()) return;
   const selection=settingValue(key);form.saving=true;message(key,'Saving your settings…');syncForm(key);updateControls();
   try {
-    const result=await post({action:{script:'save_script',render:'save_render',voice:'save_voice'}[key],
+    const result=await post({action:{script:'save_script',render:'save_render',voice:'save_voice',schedule:'save_schedule'}[key],
       ...(key==='voice'?{selection,version:form.version}:{manual_input:{selection,version:form.version}})});
     const record=result[`${key}_settings`];state[`${key}_settings`]=record;
+    if(key==='schedule') applySetting(key,record.selection);
     Object.assign(form,{version:record.version,base:structuredClone(record.selection),dirty:false});
     message(key,result.message,'success');await refresh();
   } catch(error) {message(key,error.message,'error');}
@@ -111,11 +118,12 @@ for(const key of Object.keys(forms)) {
   $(formIds[key][0]).onsubmit=event=>{event.preventDefault();saveSetting(key);};
   $(formIds[key][4]).onclick=()=>{if(key==='voice') clearVoiceSample();syncForm(key,true);message(key,'Draft discarded. Showing saved settings.');updateControls();updateSummary();updateScriptModelInfo();};
 }
+$('scheduleForm').oninput=()=>dirty('schedule');
 $('scriptProvider').onchange=()=>{dirty('script');updateScriptModelInfo();};
 $('renderMode').onchange=$('renderFallback').onchange=()=>dirty('render');
 function updateScriptModelInfo() {
   const info=state?.script_providers?.[$('scriptProvider').value];
-  $('scriptModelInfo').textContent=info?`${info.model} · ${info.key_present?'API key configured. Quota is checked when used.':'API key missing. Add it to the local environment before saving.'}`:'Choose Groq or Gemini. The saved configuration may use a legacy local model.';
+  $('scriptModelInfo').textContent=info?`${info.model}${info.free_only?' · Free-only; OpenRouter request limits apply':''} · ${info.key_present?'API key configured. Quota is checked when used.':'API key missing. Add it to the local environment before saving.'}`:'Choose Groq, Gemini or OpenRouter. The saved configuration may use a legacy local model.';
 }
 function updateSummary() {
   if(!state) return;
@@ -157,8 +165,9 @@ function render() {
   $('automaticNote').textContent=`Uses saved ${MODE_NAMES[s.render_settings.selection.render_mode]} style and ${nice(s.script_settings.selection.provider)}. Previews stay local.`;
   $('customUploadNote').textContent=cfg.uploads_enabled?`Create publishes ${cfg.visibility==='public'?'publicly':'privately'} after confirmation. Preview never uploads.`:'Both actions create local videos. Uploads are disabled.';
   $('uploaded').textContent=s.daily.uploaded;$('attempts').textContent=s.daily.attempts;$('failed').textContent=s.daily.failed;
-  $('target').textContent=`Up to ${s.daily.limit} automatic attempts/day`;
+  $('target').textContent=`${s.daily.auto_attempts ?? 0} / ${s.daily.limit} automatic attempts · manual unlimited`;
   $('next').textContent=s.next_run?time(s.next_run):s.auto_enabled?'No upcoming slot':'Paused';
+  updateCountdown();
   $('timezone').textContent=s.next_run?`${date(s.next_run)} · ${cfg.timezone}`:cfg.timezone;
   const focus=s.jobs.find(job=>!TERMINAL.has(job.state)),testing=s.voice_preview?.state==='GENERATING';
   $('liveTitle').textContent=s.busy?(focus?.title || (testing?'Generating your voice sample':'Preparing a new run…')):'Ready when you are';
@@ -191,7 +200,7 @@ async function refresh() {
     try {
       const next=await api('/api/status');
       if(!token || (state && next.started_at!==state.started_at)) token=(await api('/api/session')).token;
-      state=mergeSnapshot(state,next);connected=true;render();
+      state=mergeSnapshot(state,next);serverClockOffset=Date.parse(next.now)-Date.now();connected=true;render();
     } catch {
       connected=false;$('connection').textContent='Disconnected';$('connection').dataset.state='offline';$('offline').hidden=false;
     } finally {refreshPromise=null;updateControls();}
@@ -283,6 +292,11 @@ function showVoiceFields() {
   const provider=$('voiceProvider').value,eleven=provider==='elevenlabs';
   $('elevenVoiceRow').hidden=!eleven;$('localVoiceRow').hidden=eleven;$('elevenNotice').hidden=!eleven;
   $('localVoice').required=!eleven;$('elevenVoice').required=eleven;
+  const missingEleven=!state?.voice_keys?.elevenlabs;
+  $('elevenVoice').disabled=!canAct() || missingEleven || voiceLoading || forms.voice.saving;
+  $('loadVoices').textContent=voiceLoading?'Loading voices…':voiceCatalogRequested?'Refresh voices':'Load voices';
+  $('elevenVoiceHelp').textContent=missingEleven?'ElevenLabs API key is missing. Add ELEVENLABS_API_KEY to D:\\AutoYt\\.env, then restart AutoYT.':voiceLoading?'Loading voices from your ElevenLabs account…':voiceCatalogLoaded?'Choose an available voice. Indian-accented male voices are listed first.':'Voices load from your ElevenLabs account. If loading fails, use Refresh voices to retry.';
+  if(eleven && !missingEleven && canAct() && !voiceCatalogRequested) loadVoiceList();
   const hints={kokoro:'Local model. English male voice: am_michael. Hindi/Hinglish requires a Hindi voice such as hm_omega.',gemini:'API voice, for example Puck. Tests and narration use your Gemini quota.',piper:'Uses the configured local Piper voice model.',sapi:'Uses an installed Windows voice. Language support depends on the installed voices.',indicf5:'Uses the configured local model and reference voice.'};
   $('voiceProviderHelp').textContent=hints[provider] || 'Choose a voice provider.';
   const apiVoice=['gemini','elevenlabs'].includes(provider),missing=apiVoice && !state?.voice_keys?.[provider];
@@ -309,16 +323,17 @@ $('scriptLanguage').onchange=$('elevenVoice').onchange=()=>voiceChanged();
 $('localVoice').oninput=()=>voiceChanged();
 async function loadVoiceList(more=false) {
   if(!canAct() || voiceLoading || !state.voice_keys.elevenlabs) return;
-  voiceLoading=true;message('voice','Loading available voices…');updateControls();
+  voiceCatalogRequested=true;voiceLoading=true;message('voice','Loading available voices…');updateControls();showVoiceFields();
   try {
     const result=await post({action:'voice_list',page:more?voicePage:null}),selected=$('elevenVoice').value;
     const existing=more?[...$('elevenVoice').options].filter(option=>option.value).map(option=>({id:option.value,name:option.text})):[];
     const voices=new Map([...existing,...result.voices].map(voice=>[voice.id,voice]));
     $('elevenVoice').innerHTML='<option value="">Choose a voice</option>'+[...voices.values()].map(voice=>`<option value="${esc(voice.id)}">${esc(voice.name)}${voice.labels?' · '+esc([voice.labels.accent,voice.labels.gender,voice.labels.language].filter(Boolean).join(' / ')):''}${voice.recommended?' (Indian male)':''}</option>`).join('');
     ensureVoiceOption(selected);voicePage=result.next_page;$('moreVoices').hidden=!voicePage;
+    voiceCatalogLoaded=true;
     message('voice',voices.size?'Voices loaded. Choose one, then test it before saving.':'No voices found. Check your ElevenLabs voice library.');
   } catch(error) {message('voice',error.message,'error');}
-  finally {voiceLoading=false;updateControls();}
+  finally {voiceLoading=false;updateControls();showVoiceFields();}
 }
 $('loadVoices').onclick=()=>loadVoiceList();$('moreVoices').onclick=()=>loadVoiceList(true);
 $('testVoice').onclick=async()=>{
@@ -347,10 +362,14 @@ function updateNavigation() {
   });
 }
 window.addEventListener('hashchange',updateNavigation);updateNavigation();
+function updateCountdown() {
+  if(state) $('nextCountdown').textContent=nextRunCountdown(state.next_run,Date.now()+serverClockOffset,state.auto_enabled);
+}
 async function boot() {
   $('connection').dataset.state='loading';updateControls();
   await refresh();
   setInterval(()=>{if(!document.hidden) refresh();},5000);
+  setInterval(updateCountdown,1000);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden) refresh();});
 }
 boot();

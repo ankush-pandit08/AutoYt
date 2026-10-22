@@ -2,7 +2,7 @@
 export const TERMINAL = new Set(['PUBLISHED','AWAITING_REVIEW','FAILED','SKIPPED','READY_TO_UPLOAD']);
 export const STAGES = ['Find topic','Research','Write script','Voiceover','Find visuals','Render','Quality check','Upload'];
 export const MODE_NAMES = {normal:'Normal',motion_graphics:'Motion Graphics',hybrid:'Hybrid'};
-export const nice = value => String(value ?? '').replaceAll('_',' ').toLowerCase().replace(/^./, c=>c.toUpperCase());
+export const nice = value => value==='openrouter'?'OpenRouter':String(value ?? '').replaceAll('_',' ').toLowerCase().replace(/^./, c=>c.toUpperCase());
 export const sameSelection = (a,b) => !!a && !!b && Object.keys(a).length===Object.keys(b).length && Object.keys(a).every(key=>a[key]===b[key]);
 
 export function jobStatus(job) {
@@ -67,8 +67,18 @@ export function evidenceFor(detail) {
 export function mergeSnapshot(previous,next) {
   if(!previous || previous.started_at!==next.started_at) return next;
   const merged={...next};
-  for(const key of ['script_settings','render_settings','voice_settings']) {
+  for(const key of ['script_settings','render_settings','voice_settings','schedule_settings']) {
     if(previous[key]?.version>next[key]?.version) merged[key]=previous[key];
   }
   return merged;
+}
+
+export function nextRunCountdown(next,now,enabled=true) {
+  if(!enabled) return 'Automatic mode paused';
+  if(!next) return 'No upcoming automatic run';
+  const remaining=Math.max(0,Math.ceil((Date.parse(next)-now)/1000));
+  if(!Number.isFinite(remaining)) return 'Updating schedule…';
+  if(!remaining) return 'Run due · checking availability';
+  const hours=Math.floor(remaining/3600),minutes=Math.floor(remaining%3600/60),seconds=remaining%60;
+  return `Starts in ${String(hours).padStart(2,'0')}:${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`;
 }

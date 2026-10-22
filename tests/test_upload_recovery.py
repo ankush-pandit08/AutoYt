@@ -83,6 +83,7 @@ def test_rejected_job_with_expired_media_regenerates_from_saved_script(ready,mon
 
 @pytest.mark.parametrize("hour,expected",[(4,None),(12,"14:00,20:00"),(22,None)])
 def test_startup_plan_uses_only_remaining_slots(cfg,monkeypatch,hour,expected):
+    cfg.schedule_times="08:00,14:00,20:00"
     cfg.daily_script_batch=True
     monkeypatch.setattr("autoyt.planning.load_plan",lambda *a:None)
     monkeypatch.setattr("autoyt.planning.prepare_day",lambda c,m:c.schedule_times)

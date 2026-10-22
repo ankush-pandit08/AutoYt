@@ -79,7 +79,7 @@ class Store:
         finally:
             db.close()
 
-    def create(self, dry_run=False, topic=None, slot=None, limit=3, tz=None):
+    def create(self, dry_run=False, topic=None, slot=None, limit=6, tz=None):
         from zoneinfo import ZoneInfo
         zone = ZoneInfo(tz or "Asia/Kolkata")
         today = datetime.now(zone).date()

@@ -9,7 +9,7 @@ from .store import write_json
 
 class ScriptSelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    provider: Literal["groq", "gemini"]
+    provider: Literal["groq", "gemini", "openrouter"]
 
 
 def record(cfg):
@@ -25,15 +25,15 @@ def apply(cfg):
 
 
 def snapshot(cfg):
-    model = {"groq": cfg.groq_model, "gemini": cfg.gemini_model, "ollama": cfg.ollama_model}[cfg.llm_provider]
+    model = getattr(cfg, cfg.llm_provider + "_model")
     return {"provider": cfg.llm_provider, "model": model}
 
 
 def freeze(cfg, value):
     provider = value.get("provider")
-    if provider not in {"groq", "gemini", "ollama"} or not isinstance(value.get("model"), str):
+    if provider not in {"groq", "gemini", "ollama", "openrouter"} or not isinstance(value.get("model"), str):
         raise ValueError("Saved script provider is invalid")
-    model_key = {"groq": "groq_model", "gemini": "gemini_model", "ollama": "ollama_model"}[provider]
+    model_key = provider + "_model"
     return cfg.model_copy(update={"llm_provider": provider, model_key: value["model"]})
 
 

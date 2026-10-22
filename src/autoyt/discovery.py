@@ -115,7 +115,7 @@ def rank_insights(topics, recent_titles=(), focus="technology", slot=None):
         recent_bonus = .15 if age <= 72*3600 else 0
         return preference + slot_bonus + recent_bonus + .6*topic.score + .2*freshness + .1*useful + .1*(1-repetition) - .35*opinion
 
-    return sorted(topics, key=score, reverse=True)
+    return sorted(topics, key=lambda t: (t.source != "google_news_rss", score(t)), reverse=True)
 
 
 def parse_feed(xml, source, now=None):
@@ -196,10 +196,27 @@ def rank_topics(topics):
     return sorted(unique, key=lambda item: item.score, reverse=True)
 
 
+def creator_and_news(cfg, web, *, refresh=False):
+    from . import google_news, youtube_content
+    topics, failures = [], []
+    try:
+        topics.extend(youtube_content.discover(cfg, refresh=refresh))
+    except RuntimeError as error:
+        failures.append(str(error))
+        log.warning("YouTube topic discovery unavailable; checking Google News RSS")
+    try:
+        topics.extend(google_news.discover(cfg, web))
+    except RuntimeError as error:
+        failures.append(str(error))
+        log.warning("Google News RSS unavailable; retaining available YouTube topics")
+    if not topics and failures:
+        raise RuntimeError("TRANSIENT: Topic discovery sources unavailable: " + "; ".join(failures))
+    return topics
+
+
 def discover(cfg, web):
     if cfg.content_mode == "youtube_insights":
-        from .youtube_content import discover as discover_youtube
-        return discover_youtube(cfg)
+        return creator_and_news(cfg, web)
     urls = [f"https://trends.google.com/trending/rss?geo={cfg.google_trends_region}", *cfg.rss_feeds]
     result = []
     for url in urls:

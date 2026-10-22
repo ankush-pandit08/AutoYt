@@ -26,6 +26,8 @@ def pipeline_lock(cfg):
 
 class Pipeline:
     def __init__(self, cfg):
+        from .schedule_settings import apply as apply_schedule
+        cfg = apply_schedule(cfg)
         from .voice_settings import apply
         cfg = apply(cfg)
         from .render_settings import apply as apply_render
@@ -54,7 +56,7 @@ class Pipeline:
                     from .topic_research import evidence_basis, verify_evidence
                     if source.evidence:
                         verify_evidence(source.evidence)
-                    if script.source_basis != (evidence_basis(source.evidence) if source.evidence else source.basis) or (source.basis == "youtube" and (not source.videos or not source.evidence)):
+                    if script.source_basis != (evidence_basis(source.evidence) if source.evidence else source.basis) or (source.basis in {"youtube", "google_news"} and not source.evidence) or (source.basis == "youtube" and not source.videos):
                         raise ValueError("Prepared script does not match its saved source basis")
                 else:
                     evidence = Research.model_validate(prepared["research"])
@@ -157,7 +159,7 @@ class Pipeline:
         source = self.store.load(job_id, "source_brief")
         if source:
             source = youtube_content.SourceBrief.model_validate(source)
-            if source.basis == "youtube" and source.evidence is None:
+            if source.basis in {"youtube", "google_news"} and source.evidence is None:
                 source = youtube_content.research_brief(self.cfg, self.web, self.llm, topic,
                     folder=self.cfg.output_dir / job_id)
                 self._save(job_id, self.cfg.output_dir / job_id, "source_brief", source)
@@ -206,7 +208,7 @@ class Pipeline:
                         candidates = [Topic.model_validate(saved)]
                     else:
                         candidates = (find_candidates(cfg, self.web, self.llm, request) if request else
-                                      youtube_content.discover(cfg, refresh=True) if cfg.content_mode == "youtube_insights"
+                                      discovery.creator_and_news(cfg, self.web, refresh=True) if cfg.content_mode == "youtube_insights"
                                       and (db.load(job_id, "request") or {}).get("fresh") else
                                       discovery.discover(cfg, self.web))
                         previous = db.recent_topics(cfg.topic_dedup_days, cfg.youtube_privacy)
@@ -223,9 +225,9 @@ class Pipeline:
                             db.update(job_id, "SKIPPED", error=(
                                 "No recent, nonduplicate YouTube technology video matched your topic. "
                                 "Add a YouTube video link or choose a different topic." if request else
-                                "No unused technology topics from your selected creators in the last seven days. "
+                                "No unused technology topics from your selected creators or Google News RSS in the last seven days. "
                                 "Published stories and previously skipped or failed topics are excluded. "
-                                "Use your own script or try a different creator video link. Google Trends and RSS fallbacks are disabled."))
+                                "Use your own script, try a different creator video link, or check again for fresh technology news."))
                             return job_id
                         if request:
                             db.update(job_id, "SKIPPED", error="No verified candidate for your chosen topic. "
@@ -278,7 +280,7 @@ class Pipeline:
                                 db.update(job_id, STAGES[index], topic=candidate.title)
                                 break
                             else:
-                                db.update(job_id, "SKIPPED", error="Web research could not establish usable facts for the available creator topics. "
+                                db.update(job_id, "SKIPPED", error="Web research could not establish usable facts for the available creator and technology news topics. "
                                           "Official pages, documentation and credible web sources were checked; see research attempts.")
                                 return job_id
                             self._save(job_id, folder, "source_brief", source)

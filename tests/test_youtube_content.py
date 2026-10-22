@@ -226,14 +226,14 @@ def test_own_script_needs_no_discovery_or_two_source_gate(cfg, script, monkeypat
     assert result.source_urls == [] and source.fact_check_status == "not_checked"
 
 
-def test_empty_youtube_topics_skip_without_news_fallback(cfg, monkeypatch):
+def test_empty_creator_and_news_pool_has_accurate_skip_message(cfg, monkeypatch):
     cfg.content_mode = "youtube_insights"
     monkeypatch.setattr(discovery, "discover", lambda *args: [])
     monkeypatch.setattr(research, "research", lambda *args: pytest.fail("Unexpected news research"))
     runner = Pipeline(cfg)
     job = runner.create_run()
     assert runner.store.get(job)["state"] == "SKIPPED"
-    assert "Google Trends and RSS fallbacks are disabled" in runner.store.get(job)["error"]
+    assert "selected creators or Google News RSS" in runner.store.get(job)["error"]
 
 
 def test_old_saved_script_cannot_restart_fact_audits_in_youtube_mode(cfg, monkeypatch):
@@ -247,8 +247,8 @@ def test_old_saved_script_cannot_restart_fact_audits_in_youtube_mode(cfg, monkey
         runner._generate_script(job)
 
 
-@pytest.mark.parametrize("fresh,expected", [(False,"SKIPPED"),(True,"FAILED")])
-def test_manual_run_rechecks_research_cooldown_but_automatic_runs_wait(cfg, monkeypatch, fresh, expected):
+@pytest.mark.parametrize("fresh", [False, True])
+def test_new_runs_never_reselect_rejected_creator_topics(cfg, monkeypatch, fresh):
     cfg.content_mode = "youtube_insights"
     topic = youtube_content.topics_from_items([item()], cfg)[0]
     monkeypatch.setattr(discovery, "discover", lambda *args: [topic])
@@ -259,8 +259,8 @@ def test_manual_run_rechecks_research_cooldown_but_automatic_runs_wait(cfg, monk
     runner.store.save(old,"research_attempts",[{"topic":topic.title,"reason":"Source temporarily unavailable"}])
     monkeypatch.setattr(youtube_content,"research_brief",lambda *args: (_ for _ in ()).throw(RuntimeError("TRANSIENT: Research reached")))
     job = runner.create_run(fresh=fresh)
-    assert runner.store.get(job)["state"] == expected
-    assert (runner.store.load(job,"topic") is not None) == fresh
+    assert runner.store.get(job)["state"] == "SKIPPED"
+    assert runner.store.load(job,"topic") is None
 
 
 def test_fresh_run_still_excludes_published_creator_topics(cfg, monkeypatch):

@@ -10,13 +10,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
     timezone: str = "Asia/Kolkata"
-    schedule_times: str = "08:00,14:00,20:00"
+    schedule_times: str = "09:30,11:18,13:06,14:54,16:42,18:30"
     daily_script_batch: bool = False
     morning_plan_time: str = Field(default="05:00", pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
     content_mode: Literal["youtube_insights", "verified_news"] = "youtube_insights"
     youtube_discovery_region: str = Field(default="IN", pattern=r"^[A-Z]{2}$")
     ollama_base_url: str = "http://127.0.0.1:11434"
-    llm_provider: Literal["ollama", "groq", "gemini"] = "ollama"
+    llm_provider: Literal["ollama", "groq", "gemini", "openrouter"] = "ollama"
+    openrouter_api_key: str = Field(default="", repr=False)
+    openrouter_model: str = Field(default="google/gemma-4-31b-it:free", pattern=r"^[a-zA-Z0-9._/-]+:free$")
     gemini_api_key: str = Field(default="", repr=False)
     gemini_model: str = Field(default="gemini-3.8-flash", pattern=r"^[a-zA-Z0-9._-]+$")
     gemini_thinking_level: Literal["minimal", "low", "medium", "high"] = "low"
@@ -68,9 +70,10 @@ class Settings(BaseSettings):
     remotion_node: str = "node"
     remotion_concurrency: int = Field(default=1, ge=1, le=4)
     remotion_timeout_seconds: int = Field(default=1800, ge=30, le=7200)
-    max_videos_per_day: int = Field(default=3, ge=1, le=10)
+    max_videos_per_day: int = Field(default=6, ge=1, le=10)
     topic_dedup_days: int = Field(default=14, ge=1)
     prefer_tech_insights: bool = False
+    google_news_enabled: bool = True
     topic_focus: Literal["technology", "ai_coding"] = "technology"
     research_candidate_limit: int = Field(default=40, ge=12, le=100)
     research_timeout_seconds: int = Field(default=240, ge=30, le=900)

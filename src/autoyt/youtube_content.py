@@ -60,9 +60,10 @@ def validate_creator_names(draft, source):
 
 
 class SourceBrief(BaseModel):
-    basis: Literal["youtube", "user_input"]
+    basis: Literal["youtube", "google_news", "user_input"]
     topic: str
     videos: list[dict] = Field(default_factory=list, max_length=6)
+    news_references: list[dict] = Field(default_factory=list, max_length=6)
     evidence: Research | None = None
     fact_check_status: Literal["not_checked", "source_supported", "official_source_only"] = "not_checked"
     source_scope: str = "YouTube title and description metadata; no transcript or full video was retrieved"
@@ -231,6 +232,10 @@ def from_urls(cfg, urls):
 def brief(topic, candidates=()):
     if topic.source == "user_input":
         return SourceBrief(basis="user_input", topic=topic.title, source_scope="User-provided narration")
+    if topic.source == "google_news_rss":
+        return SourceBrief(basis="google_news", topic=topic.title,
+            news_references=[{"title": topic.title, "url": topic.url}],
+            source_scope="Google News RSS headline used only as a topic lead; supporting articles must be researched")
     if not topic.youtube_metadata:
         raise ValueError("This saved run uses the previous news mode. Start a new YouTube topic run")
     videos = [topic.youtube_metadata]
@@ -251,7 +256,7 @@ def research_brief(cfg, web, llm, topic, candidates=(), folder=None):
     return source.model_copy(update={"evidence": evidence,
         "fact_check_status": "official_source_only" if evidence_basis(evidence) == "official" else "source_supported",
         "source_scope": "Official website statements, attributed to the company; not independently corroborated"
-        if evidence_basis(evidence) == "official" else "Creator topic researched across independently supporting web pages"})
+        if evidence_basis(evidence) == "official" else "Topic researched across independently supporting web pages"})
 
 
 def supporting_evidence(evidence):
@@ -264,7 +269,7 @@ def supporting_evidence(evidence):
 
 def generate(cfg, llm, topic, source, duration_feedback=None, reviewed_draft=None, provided_narration=None):
     evidence = source.evidence
-    if source.basis == "youtube":
+    if source.basis in {"youtube", "google_news"}:
         if evidence is None:
             raise ValueError("Supporting article research is missing. Start a fresh run or retry to research this topic")
         from .topic_research import verify_evidence
@@ -380,14 +385,17 @@ def generate(cfg, llm, topic, source, duration_feedback=None, reviewed_draft=Non
 
 def selection_details(topic, source):
     from .editorial import category
-    return {"topic": topic.title, "category": category(topic.title), "content_kind": "youtube_insight",
+    return {"topic": topic.title, "category": category(topic.title),
+            "content_kind": "tech_news_insight" if source.basis == "google_news" else "youtube_insight",
             "reason": "User-provided narration" if source.basis == "user_input" else
-                      "Popular recent YouTube technology topic; original script based on source metadata",
+                      "Recent Google News RSS technology lead; original script grounded in retrieved articles"
+                      if source.basis == "google_news" else
+                      "Recent YouTube technology topic; original script grounded in retrieved articles",
             "fact_check_status": source.fact_check_status, "source_scope": source.source_scope,
             "article_sources": [{"url": s.url, "title": s.title, "publisher": s.publisher, "primary": s.primary}
                                 for s in source.evidence.sources] if source.evidence else [],
             "sources": [{"url": v["url"], "title": v["title"], "channel": v.get("channel", "")}
-                        for v in source.videos]}
+                        for v in source.videos] + source.news_references}
 
 
 def content_package(topic, source, script, captions, assets, folder):

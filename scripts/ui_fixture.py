@@ -7,11 +7,14 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from autoyt.schedule_settings import DEFAULT_TIMES, ScheduleSelection
+
 WEB = Path(__file__).resolve().parents[1] / "src/autoyt/web"
 stamp = datetime.now(timezone.utc).isoformat()
 data = {
     "now": stamp, "started_at": "ui-fixture", "auto_enabled": True, "busy": False, "notice": "",
-    "daily": {"attempts": 3, "uploaded": 1, "failed": 1, "limit": 3},
+    "daily": {"attempts": 3, "auto_attempts": 2, "uploaded": 1, "failed": 1, "limit": 6},
+    "schedule_settings": {"version": 0, "selection": {"times": DEFAULT_TIMES, "timezone": "Asia/Kolkata"}},
     "script_settings": {"version": 0, "selection": {"provider": "groq"}},
     "render_settings": {"version": 0, "selection": {"render_mode": "hybrid", "render_fallback": True}},
     "voice_settings": {"version": 0, "selection": {"provider": "kokoro", "voice": "am_michael", "language": "en"},
@@ -20,7 +23,7 @@ data = {
                          "gemini": {"model": "fixture-gemini-model", "key_present": True}},
     "voice_keys": {"gemini": False, "elevenlabs": False}, "voice_preview": None,
     "motion_renderer": {"ready": True}, "next_run": stamp, "disk_free_gb": 100,
-    "settings": {"timezone": "Asia/Kolkata", "slots": ["08:00", "14:00", "20:00"], "daily_script_batch": False,
+    "settings": {"timezone": "Asia/Kolkata", "slots": DEFAULT_TIMES, "daily_script_batch": False,
                  "morning_plan_time": "05:00", "uploads_enabled": True, "visibility": "public",
                  "language": "en", "script_style": "standard", "voice": "am_michael", "tts_engine": "kokoro",
                  "content_mode": "youtube_insights", "model": "fixture-groq-model", "topic_focus": "ai_coding",
@@ -69,18 +72,26 @@ class Handler(BaseHTTPRequestHandler):
             controls.update({key: value[key] for key in controls if key in value})
             return self.send(200, controls)
         action = value.get("action", "")
-        if action not in {"save_script", "save_render", "save_voice"}:
+        if action not in {"save_script", "save_render", "save_voice", "save_schedule"}:
             return self.send(409, {"error": "No generation, voice API or upload is available in this UI fixture."})
         time.sleep(controls["delay"])
         if controls["fail_save"]:
             return self.send(409, {"error": "Test save rejected. Your previous settings are still active."})
         kind = action.removeprefix("save_")
         request = value if kind == "voice" else value["manual_input"]
+        if kind == "schedule":
+            try:
+                request["selection"] = ScheduleSelection.model_validate(request["selection"]).model_dump()
+            except ValueError:
+                return self.send(409, {"error": "Choose six different automatic run times and a valid timezone"})
         key = kind+"_settings"
         with lock:
             if request["version"] != data[key]["version"]:
                 return self.send(409, {"error": "Settings changed elsewhere. Reload the saved selection."})
             data[key] = {"version": request["version"]+1, "selection": request["selection"]}
+            if kind == "schedule":
+                data["settings"]["slots"] = request["selection"]["times"]
+                data["settings"]["timezone"] = request["selection"]["timezone"]
             return self.send(200, {"message": "Fixture settings saved for this test page only.", key: data[key]})
 
 

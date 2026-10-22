@@ -129,7 +129,10 @@ def test_job_limits_and_slots(cfg):
     assert db.create(slot="2026-10-18T08:00") is None
     assert db.create(slot="2026-10-18T09:00")
     assert db.create(slot="2026-10-18T10:00")
-    assert db.create(slot="2026-10-18T11:00") is None
+    assert db.create(slot="2026-10-18T11:00")
+    assert db.create(slot="2026-10-18T12:00")
+    assert db.create(slot="2026-10-18T13:00")
+    assert db.create(slot="2026-10-18T14:00") is None
     assert all(db.create() for _ in range(12))
     assert db.create(dry_run=True)
 
@@ -203,6 +206,7 @@ def test_dry_run_cannot_resume_live(cfg):
 
 
 def test_ist_and_missed_policy(cfg, monkeypatch):
+    cfg.schedule_times = "08:00,14:00,20:00"
     moment = datetime(2026, 10, 18, 2, 30, tzinfo=timezone.utc)
     assert slot_key(cfg, moment) == "2026-10-18T08:00"
     calls = []

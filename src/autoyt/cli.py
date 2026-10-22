@@ -26,7 +26,9 @@ def doctor(cfg):
             checks[binary] = "OK"
         except Exception:
             checks[binary] = "MISSING: install FFmpeg including ffprobe; set absolute paths in .env"
-    if cfg.llm_provider == "gemini":
+    if cfg.llm_provider == "openrouter":
+        checks["llm"] = "OpenRouter free-only key configured (not tested)" if cfg.openrouter_api_key else "REQUIRED: OPENROUTER_API_KEY in .env"
+    elif cfg.llm_provider == "gemini":
         checks["llm"] = "Gemini key configured (not tested)" if cfg.gemini_api_key else "REQUIRED: GEMINI_API_KEY in .env"
     elif cfg.llm_provider == "groq":
         checks["llm"] = "Groq key configured (not tested)" if cfg.groq_api_key else "REQUIRED: GROQ_API_KEY in .env"

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {confirmation,evidenceFor,filterJobs,jobStatus,mergeSnapshot,runIntent,sameSelection,validateManual} from '../src/autoyt/web/ui.mjs';
+import {confirmation,evidenceFor,filterJobs,jobStatus,mergeSnapshot,runIntent,sameSelection,validateManual,nextRunCountdown} from '../src/autoyt/web/ui.mjs';
 
 test('preview-ready status never implies a pending upload',()=>{
   assert.equal(jobStatus({state:'READY_TO_UPLOAD',dry_run:1}).label,'Preview ready');
@@ -54,4 +54,12 @@ test('manual validation rejects invalid lengths, too many links and embedded cre
   assert.match(validateManual({...input,source_urls:['http://example.com']}),/HTTPS/);
   assert.match(validateManual({...input,source_urls:Array(7).fill('https://example.com')}),/six/);
   assert.match(validateManual({...input,mode:'script',content:'too short'}),/12–180/);
+});
+
+test('countdown uses absolute instants and handles paused, due and next-day runs',()=>{
+  const now=Date.parse('2026-10-22T04:00:00Z');
+  assert.equal(nextRunCountdown('2026-10-22T09:31:30+05:30',now),'Starts in 00:01:30');
+  assert.equal(nextRunCountdown('2026-10-23T09:30:00+05:30',now),'Starts in 24:00:00');
+  assert.equal(nextRunCountdown('2026-10-22T09:30:00+05:30',now),'Run due · checking availability');
+  assert.equal(nextRunCountdown(null,now,false),'Automatic mode paused');
 });
