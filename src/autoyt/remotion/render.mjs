@@ -19,11 +19,11 @@ if (process.argv.includes('--setup')) {
   const bundlePath = path.join(cache, hash.digest('hex').slice(0, 24));
   try {await stat(path.join(bundlePath, '.bundle-complete')); await stat(path.join(bundlePath, 'index.html'));}
   catch {
-    await bundle({entryPoint: path.join(root, 'index.jsx'), outDir: bundlePath, publicDir: null});
+    await bundle({entryPoint: path.join(root, 'index.jsx'), outDir: bundlePath, publicDir: null, rootDir: root, enableCaching: false});
     await writeFile(path.join(bundlePath, '.bundle-complete'), 'bundled');
   }
   console.log('Opening local render browser');
-  const browser = await openBrowser('chrome', {logLevel: 'error'});
+  const browser = await openBrowser('chrome', {logLevel: 'error', browserExecutable: job.browserExecutable || undefined, enableMultiProcessOnLinux: true});
   try {
     // Avoid another local app answering on the renderer's default port (IPv4/IPv6).
     const port = await new Promise((resolve, reject) => {

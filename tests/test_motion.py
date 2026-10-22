@@ -172,3 +172,16 @@ def test_retry_keeps_script_provider_and_model(cfg, monkeypatch):
     assert resumed.cfg.llm_provider == "gemini"
     resumed.execute(ident)
     assert "groq:saved-groq-model" in runner.store.get(ident)["error"]
+
+
+
+def test_configured_system_browser_is_detected_without_download(cfg,tmp_path,monkeypatch):
+    project=tmp_path/"renderer"
+    for package in ("remotion","@remotion/renderer","@remotion/bundler"):
+        target=project/"node_modules"/package/"package.json"
+        target.parent.mkdir(parents=True,exist_ok=True)
+        target.write_text("{}")
+    monkeypatch.setattr(motion,"PROJECT",project)
+    monkeypatch.setattr(motion.shutil,"which",lambda name: "/usr/bin/"+name if name in ["node","chromium"] else None)
+    cfg.remotion_browser_executable="chromium"
+    assert motion.availability(cfg)=={"ready":True,"node":True,"packages":True,"browser":True}

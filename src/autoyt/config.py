@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     render_mode: Literal["normal", "motion_graphics", "hybrid"] = "normal"
     render_fallback: bool = True
     remotion_node: str = "node"
+    remotion_browser_executable: str = ""
     remotion_concurrency: int = Field(default=1, ge=1, le=4)
     remotion_timeout_seconds: int = Field(default=1800, ge=30, le=7200)
     max_videos_per_day: int = Field(default=6, ge=1, le=10)

@@ -52,6 +52,14 @@ def apply(cfg):
 
 def initialize(cfg):
     path = cfg.database_path.parent / "schedule-settings.json"
+    if path.is_file() and "active" in record(cfg):
+        # Preserve the previous OmniKit record before the user-approved six-slot migration.
+        previous = record(cfg)
+        backup = cfg.database_path.parent / "schedule-settings-legacy-v2.json"
+        if not backup.exists():
+            write_json(backup, previous)
+        write_json(path, {"version": previous.get("version", 0) + 1,
+                          "selection": {"times": DEFAULT_TIMES, "timezone": cfg.timezone}})
     if not path.is_file():
         times = cfg.schedule_times.split(",")
         parsed = ScheduleSelection(times=times if len(times) == 6 else DEFAULT_TIMES, timezone=cfg.timezone)
