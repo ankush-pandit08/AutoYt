@@ -28,3 +28,7 @@ In **Production settings → YouTube connection**, click **Reconnect YouTube**. 
 Initial setup still needs the Google desktop OAuth client JSON and a pinned `YOUTUBE_CHANNEL_ID`. Expired access tokens normally refresh automatically; a rejected refresh permission is shown as **Reconnect required**. The button stores the new authorization only in the app instance where it is used. Use localhost on that machine, or forward the same dashboard port over SSH if accessing an existing remote instance. This change does not expose the localhost dashboard publicly or transfer credentials between machines.
 
 Creative visuals and sound: see [creative asset setup](docs/creative-assets.md) for the Video style switches and LottieFiles/Freesound import workflow.
+
+## Voiceover duration repair
+
+Automatically generated narration is measured at the selected voice's normal speed. If it falls outside the configured duration limits (currently 35–55 seconds), the app uses the measured words per second and previous draft to expand or shorten the script toward the middle of the range. Up to three source-checked revisions are allowed, with a word-count check before new speech requests. The app saves `narration_duration_attempts.json` in the run folder for diagnosis. It never time-stretches the voice or pads narration with silence. User-supplied narration and explicit `script_revision.json` files remain unchanged and require editing if out of range.

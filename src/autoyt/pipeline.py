@@ -6,7 +6,18 @@ from datetime import datetime, timezone
 
 import portalocker
 
-from . import ai, audio, discovery, licensing, media, research, video, youtube, youtube_content
+from . import (
+    ai,
+    audio,
+    discovery,
+    licensing,
+    media,
+    narration_duration,
+    research,
+    video,
+    youtube,
+    youtube_content,
+)
 from .limits import research_budget, research_duration
 from .manual import ManualRequest, find_candidates
 from .models import Research, Script, Topic
@@ -363,31 +374,36 @@ class Pipeline:
                     self.llm.release()
                     script = Script.model_validate(db.load(job_id, "script"))
                     speech = audio.Speech(cfg)
-                    for revision in range(2):
+                    attempts = []
+                    for revision in range(narration_duration.MAX_REVISIONS + 1):
                         segments = speech.synthesize(script, folder)
                         duration = segments[-1]["end"]
+                        attempts.append({"attempt": revision + 1, "seconds": duration,
+                                         "words": len(script.script.split()),
+                                         "within_limits": cfg.duration_min <= duration <= cfg.duration_max})
+                        self._save(job_id, folder, "narration_duration_attempts", attempts)
                         if cfg.duration_min <= duration <= cfg.duration_max:
                             break
                         if request and request.mode == "script":
                             raise ValueError(f"Your script narration measured {duration:.1f}s, outside the "
                                              "duration limits. Shorten or revise your input and start a new run; "
                                              "your script was not rewritten.")
-                        if db.load(job_id, "morning_plan"):
-                            raise ValueError("Morning script narration outside duration limits; "
-                                             "no replacement script is generated at the video slot")
                         if (folder / "script_revision.json").is_file():
                             db.update(job_id, STAGES[index], stage=2)
                             raise ValueError(f"Reviewed narration measured {duration:.1f}s; revise "
                                              "script_revision.json to fit the configured duration and retry")
-                        if revision == 1:
-                            raise ValueError("Narration outside duration tolerance after one revision")
-                        feedback = (f"Natural narration measured {duration:.1f}s, outside allowed "
-                                    f"{cfg.duration_min:g}-{cfg.duration_max:g}s. Adjust script length just enough "
-                                    "to fit those bounds. Preserve normal voice speed and supported facts; "
-                                    "do not target a fixed runtime." if script.natural_pacing else
-                                    f"Measured {duration:.1f}s; target {cfg.video_duration_seconds}s. "
-                                    "Adjust word count within 60–115 words, preserve verified facts.")
+                        if revision == narration_duration.MAX_REVISIONS:
+                            raise ValueError(f"Narration measured {duration:.1f}s after {revision} measured revisions; "
+                                             f"required {cfg.duration_min:g}–{cfg.duration_max:g}s. "
+                                             "Saved script and audio retained for retry; normal voice speed preserved.")
+                        feedback = narration_duration.feedback(cfg, script, duration)
+                        attempts[-1]["revision"] = {k: v for k, v in feedback.items() if k != "previous_draft"}
+                        self._save(job_id, folder, "narration_duration_attempts", attempts)
+                        log.info("Job %s: %s narration from %s words toward %s words for %.1f–%.1fs",
+                                 job_id, feedback["direction"], feedback["measured_words"],
+                                 feedback["target_words"], cfg.duration_min, cfg.duration_max)
                         script = self._generate_script(job_id, feedback)
+                        narration_duration.validate(script, feedback)
                         self.llm.release()
                         self._save(job_id, folder, "script", script)
                     self._save(job_id, folder, "timing", segments)
