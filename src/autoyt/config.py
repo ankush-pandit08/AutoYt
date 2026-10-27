@@ -24,10 +24,11 @@ class Settings(BaseSettings):
     gemini_thinking_level: Literal["minimal", "low", "medium", "high"] = "low"
     groq_api_key: str = Field(default="", repr=False)
     groq_model: str = "qwen/qwen3.8-27b"
-    ollama_model: str = "qwen3:4b-instruct"
+    ollama_model: str = "gemma3:4b"
     ollama_embedding_model: str = "all-minilm:22m"
-    ollama_context_length: int = Field(default=4096, ge=4096, le=16384)
+    ollama_context_length: int = Field(default=8192, ge=4096, le=16384)
     ollama_generation_timeout_seconds: int = Field(default=600, ge=60, le=1800)
+    ollama_research_timeout_seconds: int = Field(default=1800, ge=30, le=3600)
     tts_engine: Literal["kokoro", "sapi", "piper", "gemini", "indicf5", "elevenlabs"] = "gemini"
     gemini_tts_model: str = Field(default="gemini-3.8-flash-tts", pattern=r"^[a-zA-Z0-9._-]+$")
     indicf5_python: Path = Path(".venv-indicf5/Scripts/python.exe" if os.name == "nt" else ".venv-indicf5/bin/python")

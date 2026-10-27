@@ -65,9 +65,14 @@ def request_limit(seconds):
         _request_limit.reset(token)
 
 
+def research_duration(cfg):
+    return (cfg.ollama_research_timeout_seconds if cfg.llm_provider == "ollama"
+            else cfg.research_timeout_seconds)
+
+
 def bounded_research(function):
     @wraps(function)
     def run(cfg, *args, **kwargs):
-        with research_budget(cfg.research_timeout_seconds):
+        with research_budget(research_duration(cfg)):
             return function(cfg, *args, **kwargs)
     return run

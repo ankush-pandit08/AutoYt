@@ -42,6 +42,7 @@ def test_research_transport_failure_does_not_retry_provider(cfg, monkeypatch, pr
 
 
 def test_source_provider_failure_is_not_treated_as_bad_article(cfg, research_data, monkeypatch, tmp_path):
+    cfg.llm_provider = "groq"
     source = research_data.sources[1].model_copy(update={"primary": False,
         "url": "https://expert.example/processor", "title": "processor computer"})
     monkeypatch.setattr(topic_research, "source_urls", lambda *args: (
@@ -61,6 +62,7 @@ def test_source_provider_failure_is_not_treated_as_bad_article(cfg, research_dat
 
 def test_pipeline_budget_covers_candidate_fallbacks(cfg, monkeypatch):
     cfg.research_timeout_seconds = 30
+    cfg.ollama_research_timeout_seconds = 30
     clock = [100.0]
     monkeypatch.setattr(limits.time, "monotonic", lambda: clock[0])
     candidates = [Topic(title=title, url=f"https://example.com/{i}",

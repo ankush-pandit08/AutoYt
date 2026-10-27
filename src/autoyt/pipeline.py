@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import portalocker
 
 from . import ai, audio, discovery, licensing, media, research, video, youtube, youtube_content
-from .limits import research_budget
+from .limits import research_budget, research_duration
 from .manual import ManualRequest, find_candidates
 from .models import Research, Script, Topic
 from .net import Web
@@ -249,9 +249,9 @@ class Pipeline:
                     research_started = datetime.now(timezone.utc).isoformat()
                     def research_progress(message):
                         db.save(job_id, "research_progress", {"message": message,
-                            "started_at": research_started, "limit_seconds": cfg.research_timeout_seconds})
+                            "started_at": research_started, "limit_seconds": research_duration(cfg)})
                         log.info("Research %s: %s", job_id, message)
-                    with research_budget(cfg.research_timeout_seconds, research_progress):
+                    with research_budget(research_duration(cfg), research_progress):
                         research_progress("Finding supporting sources")
                         if cfg.content_mode == "youtube_insights":
                             selected = Topic.model_validate(db.load(job_id, "topic"))

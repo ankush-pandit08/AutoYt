@@ -24,7 +24,8 @@ def news_topic():
 
 def test_tech_filter_dates_and_metadata():
     topics = google_news.parse(feed("OpenAI releases new coding model", "Celebrity announces wedding",
-        "Microsoft shares rise after earnings", "AI productivity tips", "New quantum processor breakthrough"))
+        "Microsoft shares rise after earnings", "AI productivity tips", "New quantum processor breakthrough",
+        "Anthropic strikes deal to launch European consultancy", "AI Academy launches new books for authors"))
     assert [t.title for t in topics] == ["OpenAI releases new coding model", "New quantum processor breakthrough"]
     assert all(t.source == "google_news_rss" and not t.youtube_metadata for t in topics)
     assert not google_news.parse(feed("OpenAI releases new coding model", age=8))

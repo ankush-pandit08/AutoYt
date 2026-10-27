@@ -43,14 +43,14 @@ $('reconnect').onclick=()=>refresh();
 
 function settingValue(key) {
   if(key==='schedule') return {times:Array.from({length:6},(_,i)=>$('scheduleTime'+(i+1)).value),timezone:$('scheduleTimezone').value.trim()};
-  if(key==='script') return {provider:$('scriptProvider').value};
+  if(key==='script') return {provider:$('scriptProvider').value,...($('scriptProvider').value==='ollama'?{model:$('localScriptModel').value}:{})};
   if(key==='render') return {render_mode:$('renderMode').value,render_fallback:$('renderFallback').checked};
   return {provider:$('voiceProvider').value,language:$('scriptLanguage').value,
     voice:$('voiceProvider').value==='elevenlabs' ? $('elevenVoice').value:$('localVoice').value.trim()};
 }
 function applySetting(key,value) {
   if(key==='schedule') {value.times.forEach((time,i)=>$('scheduleTime'+(i+1)).value=time);$('scheduleTimezone').value=value.timezone;}
-  else if(key==='script') $('scriptProvider').value=value.provider;
+  else if(key==='script') {$('scriptProvider').value=value.provider;$('localScriptModel').value=value.model || 'gemma3:4b';}
   else if(key==='render') {$('renderMode').value=value.render_mode;$('renderFallback').checked=value.render_fallback;}
   else {
     Object.assign(draftVoices,state.voice_settings.voices);
@@ -119,11 +119,13 @@ for(const key of Object.keys(forms)) {
   $(formIds[key][4]).onclick=()=>{if(key==='voice') clearVoiceSample();syncForm(key,true);message(key,'Draft discarded. Showing saved settings.');updateControls();updateSummary();updateScriptModelInfo();};
 }
 $('scheduleForm').oninput=()=>dirty('schedule');
-$('scriptProvider').onchange=()=>{dirty('script');updateScriptModelInfo();};
+$('scriptProvider').onchange=$('localScriptModel').onchange=()=>{dirty('script');updateScriptModelInfo();};
 $('renderMode').onchange=$('renderFallback').onchange=()=>dirty('render');
 function updateScriptModelInfo() {
   const info=state?.script_providers?.[$('scriptProvider').value];
-  $('scriptModelInfo').textContent=info?`${info.model}${info.free_only?' · Free-only; OpenRouter request limits apply':''} · ${info.key_present?'API key configured. Quota is checked when used.':'API key missing. Add it to the local environment before saving.'}`:'Choose Groq, Gemini or OpenRouter. The saved configuration may use a legacy local model.';
+  $('localScriptModelRow').hidden=$('scriptProvider').value!=='ollama';
+  if(info?.local) {$('scriptModelInfo').textContent=`${$('localScriptModel').value} · Runs on this PC; no API key or cloud quota. CPU generation can take several minutes. Ollama and the selected model must be installed; checked when saving.`;return;}
+  $('scriptModelInfo').textContent=info?`${info.model}${info.free_only?' · Free-only; OpenRouter request limits apply':''} · ${info.key_present?'API key configured. Quota is checked when used.':'API key missing. Add it to the local environment before saving.'}`:'Choose Groq, Gemini, OpenRouter or Ollama local models.';
 }
 function updateSummary() {
   if(!state) return;

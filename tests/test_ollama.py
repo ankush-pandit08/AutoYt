@@ -20,7 +20,7 @@ def test_ollama_actionable_failures(cfg, monkeypatch, status, text, expected):
         LLM(cfg).structured(Audit, "test", {})
     assert len(calls) == (3 if status == 503 else 1)
     assert calls[0]["json"]["keep_alive"] == "2m"
-    assert calls[0]["json"]["options"]["num_ctx"] == 4096
+    assert calls[0]["json"]["options"]["num_ctx"] == cfg.ollama_context_length
 
 
 def test_prompt_retains_instructions_for_user_only_model_templates(cfg, monkeypatch):

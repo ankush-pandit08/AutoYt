@@ -9,6 +9,7 @@ from autoyt.pipeline import Pipeline
 
 
 def test_search_links_are_not_evidence_and_creator_links_are_excluded(cfg, monkeypatch):
+    cfg.llm_provider = "groq"  # Cloud mode still reviews arbitrary technical sources.
     cfg.rss_feeds = []
     topic = youtube_content.topics_from_items([item()], cfg)[0]
     topic.youtube_metadata['description'] = 'https://youtube.com/watch?v=abc123DEF45'
@@ -32,6 +33,7 @@ def test_non_article_links_are_rejected(url):
 
 
 def test_real_article_text_and_exact_quotes_are_required(cfg, research_data, monkeypatch, tmp_path):
+    cfg.llm_provider = "groq"  # Cloud mode still reviews arbitrary technical sources.
     topic = youtube_content.topics_from_items([item()], cfg)[0]
     sources = research_data.sources
     monkeypatch.setattr(topic_research, 'source_urls', lambda *args: ('processor computer', [s.url for s in sources]))
@@ -164,6 +166,7 @@ def test_single_nonofficial_web_page_is_not_independent_evidence(research_data):
 
 
 def test_non_news_web_pages_are_discovered_and_screened(cfg,monkeypatch):
+    cfg.llm_provider = "groq"  # Cloud mode still reviews arbitrary technical sources.
     cfg.rss_feeds=[]
     topic=youtube_content.topics_from_items([item()],cfg)[0]
     rss='<rss><channel><item><link>https://technical-research.example/docs/model</link></item></channel></rss>'

@@ -44,7 +44,9 @@ def parse(xml, now=None):
         if not discovery.words(title) & discovery.TECH or not is_product_development(title):
             continue
         if discovery.words(title) & {"stocks", "shares", "earnings", "election", "celebrity", "rumor", "rumour",
-                                      "jobs", "salaries", "careers", "reskilling", "valuation", "funding"}:
+                                      "jobs", "salaries", "careers", "reskilling", "valuation", "funding",
+                                      "consultancy", "consulting", "academy", "authors", "books", "webinar",
+                                      "summit", "awards", "marketing"}:
             continue
         topics.append(Topic(title=title, url=link, source="google_news_rss", published_at=published,
                             score=.5 + .3 * (1 - age / discovery.MAX_STORY_AGE_SECONDS)))
