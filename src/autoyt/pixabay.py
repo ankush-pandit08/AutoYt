@@ -56,7 +56,7 @@ def search(cfg, web, query, kind):
 
 
 def acquire(cfg, web, query, used):
-    for kind in ("image", "video"):
+    for kind in ("video", "image"):
         for hit in search(cfg, web, query, kind).get("hits", []):
             if not relevant(query, hit):
                 continue
@@ -65,7 +65,7 @@ def acquire(cfg, web, query, used):
                 continue
             if kind == "video":
                 choices = [v for v in hit.get("videos", {}).values()
-                           if v.get("width", 0) >= 720 and v.get("height", 0) >= 1280
+                           if min(v.get("width", 0), v.get("height", 0)) >= 720
                            and 0 < v.get("size", 0) < 80_000_000]
                 if not choices:
                     continue
@@ -82,7 +82,7 @@ def acquire(cfg, web, query, used):
                 if kind == "video":
                     streams = probe(cfg, temporary)["streams"]
                     video = next(v for v in streams if v["codec_type"] == "video")
-                    if video["width"] < 720 or video["height"] < 1280:
+                    if min(video["width"], video["height"]) < 720:
                         continue
                 else:
                     with Image.open(temporary) as image:

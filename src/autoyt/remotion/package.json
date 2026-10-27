@@ -3,12 +3,21 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "scripts": {"setup": "node render.mjs --setup", "check": "node --check render.mjs"},
+  "scripts": {
+    "setup": "node render.mjs --setup",
+    "check": "node --check render.mjs"
+  },
   "dependencies": {
+    "@iconify-json/lucide": "1.2.147",
+    "@iconify/react": "6.0.3",
     "@remotion/bundler": "4.0.537",
+    "@remotion/lottie": "4.0.537",
     "@remotion/renderer": "4.0.537",
-    "remotion": "4.0.537",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "remotion": "4.0.537"
+  },
+  "overrides": {
+    "zod": "4.6.6"
   }
 }

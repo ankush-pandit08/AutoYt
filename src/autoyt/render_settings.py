@@ -11,15 +11,20 @@ class RenderSelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     render_mode: Literal["normal", "motion_graphics", "hybrid"] = "normal"
     render_fallback: StrictBool = True
+    motion_icons: StrictBool = True
+    motion_lottie: StrictBool = True
+    sound_effects: StrictBool = True
 
 
 def selection(cfg):
-    return RenderSelection(render_mode=cfg.render_mode, render_fallback=cfg.render_fallback).model_dump()
+    return RenderSelection(**{key: getattr(cfg, key) for key in RenderSelection.model_fields}).model_dump()
 
 
 def record(cfg):
     path = cfg.database_path.parent / "render-settings.json"
-    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {"version": 0, "selection": selection(cfg)}
+    saved = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {"version": 0, "selection": selection(cfg)}
+    saved["selection"] = RenderSelection.model_validate(saved["selection"]).model_dump()
+    return saved
 
 
 def apply(cfg):

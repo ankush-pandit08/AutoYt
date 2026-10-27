@@ -10,6 +10,22 @@ LICENSES = {
 
 
 def check_asset(asset):
+    kind = asset.get("kind")
+    if kind in ("animation", "sound_effect", "icon"):
+        from .creative import CC0, LOTTIE_LICENSE, LUCIDE_LICENSE
+        if ((kind == "animation" and asset.get("license") == "Original AutoYT graphics") or
+                (kind == "sound_effect" and asset.get("license") == "Original AutoYT audio")):
+            return "Original"
+        source = urlsplit(asset.get("source_url") or "")
+        if kind == "icon" and asset.get("license") == "ISC" and asset.get("license_url") == LUCIDE_LICENSE and source.hostname == "lucide.dev":
+            return "Lucide via Iconify"
+        if source.scheme != "https" or not asset.get("attribution") or asset.get("free_to_use") is not True or not asset.get("permitted_use"):
+            raise ValueError("Creative asset needs source, creator and confirmed license")
+        if kind == "animation" and source.hostname in ("lottiefiles.com", "www.lottiefiles.com") and asset.get("license") == "Lottie Simple License" and asset.get("license_url") == LOTTIE_LICENSE:
+            return "LottieFiles"
+        if kind == "sound_effect" and source.hostname in ("freesound.org", "www.freesound.org") and asset.get("license") == "CC0-1.0" and asset.get("license_url") == CC0:
+            return "Freesound CC0"
+        raise ValueError("Creative asset license is not approved")
     if asset.get("kind") == "graphics" and asset.get("license") == "Original AutoYT graphics":
         return "Original"
     if asset.get("kind") not in ("stock", "stock_image"):

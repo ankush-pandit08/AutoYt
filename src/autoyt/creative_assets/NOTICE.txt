@@ -1,0 +1,2 @@
+tech-pulse.json and synthesized transition audio: original AutoYT assets.
+Lucide icons via Iconify: see LUCIDE-LICENSE.txt (ISC and Feather-derived MIT notices).

@@ -11,10 +11,66 @@ from .store import write_json
 PROJECT = Path(__file__).with_name("remotion")
 
 
+def video_background(cfg, asset, scene, folder):
+    """Prepare only the selected licensed clip; source audio never enters narration."""
+    if asset.get("kind") != "stock" or not asset.get("path"):
+        return None
+    from .licensing import check_asset
+    from .store import digest
+    check_asset(asset)
+    source = Path(asset["path"])
+    if source.stat().st_size > 80_000_000:
+        raise ValueError("Motion background video exceeds the size limit")
+    key = hashlib.sha256(json.dumps([digest(source), cfg.video_width, cfg.video_height,
+        cfg.video_fps, scene["frames"]]).encode()).hexdigest()
+    target = folder / ("background-"+key[:24]+".mp4")
+    if not target.is_file():
+        temporary = target.with_suffix(".tmp.mp4")
+        run([cfg.ffmpeg, "-y", "-v", "error", "-stream_loop", "-1", "-i", source,
+             "-vf", f"scale={cfg.video_width}:{cfg.video_height}:force_original_aspect_ratio=increase,"
+                    f"crop={cfg.video_width}:{cfg.video_height},setsar=1,fps={cfg.video_fps}",
+             "-frames:v", str(scene["frames"]), "-an", "-c:v", "libx264", "-preset", "fast",
+             "-crf", "20", "-threads", "2", "-pix_fmt", "yuv420p", "-movflags", "+faststart", temporary])
+        probe(cfg, temporary)
+        temporary.replace(target)
+    return {"kind": "video", "path": str(target.resolve()), "cache_key": key,
+            "source_url": asset["source_url"]}
+
+
+def image_background(cfg, asset):
+    """Inline a bounded, licensed local photo so rendering never requests remote media."""
+    if asset.get("kind") != "stock_image" or not asset.get("path"):
+        return None
+    import base64
+    import io
+
+    from PIL import Image, ImageOps
+
+    from .licensing import check_asset
+    check_asset(asset)
+    path = Path(asset["path"])
+    if path.stat().st_size > 12_000_000:
+        raise ValueError("Motion background image exceeds the size limit")
+    with Image.open(path) as image:
+        if image.width*image.height > 40_000_000:
+            raise ValueError("Motion background image exceeds the pixel limit")
+        image = ImageOps.fit(ImageOps.exif_transpose(image).convert("RGB"),
+                             (cfg.video_width, cfg.video_height))
+        output = io.BytesIO()
+        image.save(output, format="JPEG", quality=88)
+    return {"kind": "image", "source_url": asset["source_url"],
+            "src": "data:image/jpeg;base64," + base64.b64encode(output.getvalue()).decode()}
+
+
 def availability(cfg):
     node = shutil.which(cfg.remotion_node)
+    packages = ["remotion", "@remotion/renderer", "@remotion/bundler"]
+    if cfg.motion_icons:
+        packages.extend(["@iconify/react", "@iconify-json/lucide"])
+    if cfg.motion_lottie:
+        packages.append("@remotion/lottie")
     installed = all((PROJECT / "node_modules" / package / "package.json").is_file()
-                    for package in ("remotion", "@remotion/renderer", "@remotion/bundler"))
+                    for package in packages)
     browser = any(path.is_file() for path in (PROJECT/"node_modules/.remotion/chrome-headless-shell").glob(
         "*/*/chrome-headless-shell*"))
     if cfg.remotion_browser_executable:
@@ -46,14 +102,30 @@ def plan(cfg, script, segments, assets):
 
 
 def render_clips(cfg, script, segments, assets, folder):
+    from . import creative
     if not availability(cfg)["ready"]:
         raise RuntimeError("CONFIGURATION: Install Node.js and run scripts/setup_motion.ps1 for local motion graphics")
     scenes = plan(cfg, script, segments, assets)
+    clip_folder = folder / "motion"
+    clip_folder.mkdir(exist_ok=True)
+    library = creative.catalog(cfg) if cfg.motion_lottie else []
+    credits = []
+    for scene in scenes:
+        if scene["renderer"] != "remotion":
+            continue
+        text = script.scenes[scene["index"]].visual_query + " " + scene["headline"]
+        asset = assets[scene["index"]]
+        scene["background"] = video_background(cfg, asset, scene, clip_folder) or image_background(cfg, asset)
+        scene["icon"] = creative.topic_icon(text) if cfg.motion_icons else None
+        if cfg.motion_lottie:
+            scene["animation_data"], credit = creative.select_animation(cfg, text, library)
+            credits.append(credit)
+    if cfg.motion_icons:
+        credits.append({"kind": "icon", "license": "ISC", "license_url": creative.LUCIDE_LICENSE,
+                        "source_url": "https://lucide.dev", "attribution": "Lucide Contributors / Iconify (ISC)"})
     code = hashlib.sha256()
     for name in ("index.jsx", "render.mjs", "package-lock.json"):
         code.update((PROJECT/name).read_bytes())
-    clip_folder = folder / "motion"
-    clip_folder.mkdir(exist_ok=True)
     selected = []
     for scene in scenes:
         if scene["renderer"] != "remotion":
@@ -86,4 +158,9 @@ def render_clips(cfg, script, segments, assets, folder):
                 abs(int(rate[0])/max(1, int(rate[1]))-cfg.video_fps) > .1:
             raise RuntimeError("VALIDATION: Motion scene has incorrect dimensions, codec, frame rate or duration")
         output_assets[scene["index"]] = {"kind": "motion", "path": scene["output"]}
-    return output_assets, scenes
+    from .licensing import audit
+    if credits:
+        audit(credits)
+    write_json(clip_folder / "creative-credits.json", credits)
+    return output_assets, [{key: ({k: v for k, v in value.items() if k not in ("src", "path")} if key == "background" and value else value)
+                            for key, value in scene.items() if key != "animation_data"} for scene in scenes]

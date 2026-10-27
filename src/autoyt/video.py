@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 import shutil
@@ -9,14 +10,19 @@ from .audio import check_audio, probe, run
 from .store import write_json
 
 
-def font(size, bold=False):
-    candidates = [Path("data/fonts/NotoSansDevanagari-Bold.ttf" if bold else "data/fonts/NotoSansDevanagari.ttf"),
+def font(size, bold=False, devanagari=False):
+    candidates = [Path("C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf"),
+                  Path("/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf" if bold else
+                       "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf"),
+                  Path("data/fonts/NotoSansDevanagari-Bold.ttf" if bold else "data/fonts/NotoSansDevanagari.ttf"),
                   Path("C:/Windows/Fonts/NirmalaB.ttf" if bold else "C:/Windows/Fonts/Nirmala.ttf"),
                   Path("/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf" if bold else
                        "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf"),
                   Path("C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf"),
                   Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else
                        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")]
+    if devanagari:
+        candidates = candidates[2:5] + candidates[:2] + candidates[5:]
     # A regular variable font is not a bold face; prefer installed real bold fonts.
     if bold:
         candidates.append(Path("data/fonts/NotoSansDevanagari.ttf"))
@@ -121,7 +127,7 @@ def srt_time(seconds):
 
 def subtitles(cfg, segments, folder):
     size = int(cfg.video_width*.068*(1.5 if cfg.narration_language == "hi" else 1))
-    family = font(size, True).getname()[0]
+    family = font(size, True, cfg.narration_language == "hi").getname()[0]
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {cfg.video_width}
@@ -130,7 +136,7 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{family},{size},&H00FFFFFF,&H00FFFFFF,&H30000000,&H90000000,-1,0,0,0,100,100,0,0,3,{max(2, int(cfg.video_width*.01))},0,2,{int(cfg.video_width*.12)},{int(cfg.video_width*.12)},{int(cfg.video_height*.23)},1
+Style: Default,{family},{size},&H00FFFFFF,&H00FFFFFF,&H60000000,&H80000000,-1,0,0,0,100,100,0,0,1,{max(1, cfg.video_width*.002)},1,7,0,0,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -140,9 +146,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         tokens = segment["text"].split()
         groups, group = [], []
         measure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-        face = font(size, True)
+        face = font(size, True, cfg.narration_language == "hi")
         for token in tokens:
-            if group and (len(group) >= 3 or measure.textlength(" ".join([*group, token]).upper(),
+            if group and (len(group) >= 3 or measure.textlength(" ".join([*group, token]),
                                                                font=face) > cfg.video_width*.70):
                 groups.append(group)
                 group = []
@@ -153,12 +159,26 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         cursor = segment["start"]
         for group, weight in zip(groups, weights):
             end = cursor + (segment["end"]-segment["start"]) * weight/sum(weights)
-            plain = " ".join(group).upper().replace("{", "").replace("}", "").replace("\\", "")
+            plain = " ".join(group).replace("{", "").replace("}", "").replace("\\", "")
             # Phrase timing is estimated within measured TTS scenes; no false word-alignment claim.
-            highlighted = "{\\c&HD2E838&}" + plain.split()[0] + "{\\c&HFFFFFF&}"
-            text = highlighted + (" " + " ".join(plain.split()[1:]) if len(group) > 1 else "")
+            # libass sizes fonts by their full ascent/descent, unlike Pillow's em size.
+            ascent, descent = face.getmetrics()
+            metric_scale = size / (ascent + descent)
+            width = measure.textlength(plain, font=face) * metric_scale
+            words = plain.split()
+            emphasis = max(range(len(words)), key=lambda i: len(words[i].strip('.,!?')))
+            prefix = " ".join(words[:emphasis]) + (" " if emphasis else "")
+            left = (cfg.video_width-width)/2
+            top = cfg.video_height*.73
+            pad = max(2, cfg.video_width*.008)
+            x = left + measure.textlength(prefix, font=face)*metric_scale
+            right = x + measure.textlength(words[emphasis], font=face)*metric_scale
+            rectangle = (f"m {x-pad:.1f} {top:.1f} l {right+pad:.1f} {top:.1f} "
+                         f"{right+pad:.1f} {top+size:.1f} {x-pad:.1f} {top+size:.1f}")
             events.append(f"Dialogue: 0,{ass_time(cursor)},{ass_time(end)},Default,,0,0,0,,"
-                          "{\\fad(60,60)}" + text)
+                          "{\\an7\\pos(0,0)\\bord0\\shad0\\1c&HFF503D&\\p1\\fad(60,60)}" + rectangle)
+            events.append(f"Dialogue: 1,{ass_time(cursor)},{ass_time(end)},Default,,0,0,0,,"
+                          f"{{\\pos({left:.1f},{top:.1f})\\fad(60,60)}}" + plain)
             srt.append(f"{len(srt)+1}\n{srt_time(cursor)} --> {srt_time(end)}\n{plain}\n")
             timings.append({"start": cursor, "end": end, "text": plain})
             cursor = end
@@ -200,6 +220,17 @@ def render(cfg, script, segments, assets, folder):
             logging.getLogger(__name__).warning(fallback)
     report = {"requested_mode": requested, "effective_mode": effective, "fallback_reason": fallback,
               "scenes": scenes, "status": "rendering"}
+    from . import creative
+    credits_path = folder / "motion" / "creative-credits.json"
+    credits = json.loads(credits_path.read_text(encoding="utf-8")) if effective != "normal" and credits_path.is_file() else []
+    _, sound_credits = creative.sound_bus(cfg, segments, folder, creative.catalog(cfg) if cfg.sound_effects else [])
+    report["creative_assets"] = [*credits, *sound_credits]
+    report["enhancements"] = {"icons": bool(cfg.motion_icons and effective != "normal"),
+                              "lottie": bool(cfg.motion_lottie and effective != "normal"),
+                              "sound_effects": bool(sound_credits)}
+    from .licensing import audit
+    if report["creative_assets"]:
+        audit(report["creative_assets"])
     write_json(folder / "render_report.json", report)
     result = _render_normal(cfg, script, segments, render_assets, folder)
     write_json(folder / "render_report.json", {**report, "status": "completed"})
@@ -209,7 +240,7 @@ def render(cfg, script, segments, assets, folder):
 def _render_normal(cfg, script, segments, assets, folder):
     folder = folder.resolve()
     local_fonts(cfg, folder)
-    stock_labels(cfg, segments, assets, folder)
+    # Source and license records stay in the job credits; no stock-footage watermark.
     fps, w, h = cfg.video_fps, cfg.video_width, cfg.video_height
     voice_duration = segments[-1]["end"]
     total = voice_duration
@@ -246,8 +277,16 @@ def _render_normal(cfg, script, segments, assets, folder):
              "-video_track_timescale", str(fps*512), name], cwd=folder)
         clips.append(name)
     (folder / "concat.txt").write_text("\n".join(f"file '{c}'" for c in clips), encoding="utf-8")
+    audio_inputs = ["-i", "narration.wav"]
+    audio_filters = ["-af", "loudnorm=I=-16:TP=-1.5:LRA=9,apad"]
+    if cfg.sound_effects and (folder / "effects.wav").is_file():
+        audio_inputs += ["-i", "effects.wav"]
+        audio_filters = ["-filter_complex", "[1:a]loudnorm=I=-16:TP=-1.5:LRA=9,asplit=2[voice][key];"
+                         "[2:a][key]sidechaincompress=threshold=0.025:ratio=8:attack=5:release=150[ducked];"
+                         "[voice][ducked]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.84:level=false,apad[mix]",
+                         "-map", "0:v:0", "-map", "[mix]"]
     run([cfg.ffmpeg, "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", "concat.txt",
-         "-i", "narration.wav", "-vf", "ass=subtitles.ass:fontsdir=.fonts", "-af", "loudnorm=I=-16:TP=-1.5:LRA=9,apad",
+         *audio_inputs, "-vf", "ass=subtitles.ass:fontsdir=.fonts", *audio_filters,
          "-t", f"{total:.3f}", "-c:v", "libx264", "-preset", cfg.encoder_preset, "-crf", str(cfg.crf),
          "-threads", "2", "-pix_fmt", "yuv420p", "-color_range", "tv", "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
          "-movflags", "+faststart", "final.mp4"], cwd=folder)

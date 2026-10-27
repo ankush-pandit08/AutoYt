@@ -17,6 +17,13 @@ def test_mode_validation_and_saved_default(cfg):
     updated, saved = render_settings.save(cfg, {"render_mode": "hybrid", "render_fallback": False}, 0)
     assert saved["version"] == 1 and updated.render_mode == "hybrid"
     assert Pipeline(cfg).cfg.render_mode == "hybrid"  # Scheduled runs create the same Pipeline.
+    runner = Pipeline(cfg)
+    runner.execute = lambda ident: ident
+    manual = runner.create_run(dry_run=True)
+    assert runner.store.load(manual, "render_settings") == saved["selection"]
+    runner.store.update(manual, "FAILED")
+    automatic = runner.create_run(dry_run=True, slot="2030-01-01T09:30:00+05:30")
+    assert runner.store.load(automatic, "render_settings") == saved["selection"]
     with pytest.raises(ValueError, match="changed"):
         render_settings.save(cfg, saved["selection"], 0)
     with pytest.raises(ValidationError):
@@ -177,7 +184,7 @@ def test_retry_keeps_script_provider_and_model(cfg, monkeypatch):
 
 def test_configured_system_browser_is_detected_without_download(cfg,tmp_path,monkeypatch):
     project=tmp_path/"renderer"
-    for package in ("remotion","@remotion/renderer","@remotion/bundler"):
+    for package in ("remotion","@remotion/renderer","@remotion/bundler","@iconify/react","@iconify-json/lucide","@remotion/lottie"):
         target=project/"node_modules"/package/"package.json"
         target.parent.mkdir(parents=True,exist_ok=True)
         target.write_text("{}")
@@ -185,3 +192,44 @@ def test_configured_system_browser_is_detected_without_download(cfg,tmp_path,mon
     monkeypatch.setattr(motion.shutil,"which",lambda name: "/usr/bin/"+name if name in ["node","chromium"] else None)
     cfg.remotion_browser_executable="chromium"
     assert motion.availability(cfg)=={"ready":True,"node":True,"packages":True,"browser":True}
+
+
+def test_shot_background_is_local_bounded_and_requires_license(cfg, tmp_path):
+    import base64
+    import io
+
+    from PIL import Image
+
+    path = tmp_path / "photo.jpg"
+    Image.new("RGB", (1200, 800), "teal").save(path)
+    asset = {"kind": "stock_image", "path": str(path), "provider": "Wikimedia Commons",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Test.jpg", "license": "CC0-1.0",
+        "license_url": "https://creativecommons.org/publicdomain/zero/1.0/", "free_to_use": True,
+        "permitted_use": True, "attribution": "Test creator"}
+    background = motion.image_background(cfg, asset)
+    assert background["src"].startswith("data:image/jpeg;base64,")
+    with Image.open(io.BytesIO(base64.b64decode(background["src"].split(",", 1)[1]))) as image:
+        assert image.size == (cfg.video_width, cfg.video_height)
+    assert motion.image_background(cfg, {"kind": "graphics", "path": None}) is None
+    with pytest.raises(ValueError, match="rights"):
+        motion.image_background(cfg, {**asset, "license": "Unknown"})
+
+
+def test_video_background_strips_source_audio_and_reuses_validated_cache(cfg, tmp_path, monkeypatch):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"licensed source content")
+    asset = {"kind": "stock", "path": str(source), "source_url": "https://www.pexels.com/video/test-123/",
+             "license": "Pexels License https://www.pexels.com/license/", "attribution": "Test creator"}
+    calls = []
+    def encode(command, **kwargs):
+        calls.append(command)
+        assert "-an" in command and command[command.index("-frames:v")+1] == "90"
+        Path(command[-1]).write_bytes(b"normalized video")
+    monkeypatch.setattr(motion, "run", encode)
+    monkeypatch.setattr(motion, "probe", lambda *args: {"streams": [{"codec_type": "video"}]})
+    first = motion.video_background(cfg, asset, {"frames": 90}, tmp_path)
+    second = motion.video_background(cfg, asset, {"frames": 90}, tmp_path)
+    assert first == second and first["kind"] == "video" and len(calls) == 1
+    source.write_bytes(b"changed source content")
+    assert motion.video_background(cfg, asset, {"frames": 90}, tmp_path)["cache_key"] != first["cache_key"]
+    assert len(calls) == 2

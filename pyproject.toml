@@ -20,7 +20,7 @@ autoyt = "autoyt.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-autoyt = ["*.ps1", "web/*.html", "web/*.css", "web/*.js", "web/*.mjs", "remotion/*.json", "remotion/*.jsx", "remotion/*.mjs"]
+autoyt = ["*.ps1", "web/*.html", "web/*.css", "web/*.js", "web/*.mjs", "remotion/*.json", "remotion/*.jsx", "remotion/*.mjs", "creative_assets/*.json", "creative_assets/*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

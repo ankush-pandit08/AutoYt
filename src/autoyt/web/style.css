@@ -18,3 +18,5 @@ dialog{border:1px solid #cedce1;border-radius:18px;padding:25px;width:min(800px,
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{transition:none!important;animation:none!important}}
 
 .schedule-times{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.schedule-times input{min-width:0;width:100%}#nextCountdown{display:block;font-variant-numeric:tabular-nums}@media(max-width:600px){.schedule-times{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+.creative-options{display:grid;gap:14px;margin:22px 0}.creative-import{display:grid;gap:18px;margin-top:20px}.creative-import .field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.creative-import .field{margin:0;min-width:0}.creative-library{display:grid;gap:12px;padding-left:20px;overflow-wrap:anywhere}.creative-library:empty{display:none}@media(max-width:720px){.creative-import .field-grid{grid-template-columns:1fr}}

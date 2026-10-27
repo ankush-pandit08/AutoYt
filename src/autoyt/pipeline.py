@@ -178,7 +178,8 @@ class Pipeline:
         cfg, db = self.cfg, self.store
         from .render_settings import RenderSelection
         # Jobs predating this feature retain their original Normal renderer.
-        frozen = RenderSelection.model_validate(db.load(job_id, "render_settings") or {"render_mode": "normal"})
+        frozen = RenderSelection.model_validate({"motion_icons": False, "motion_lottie": False,
+            "sound_effects": False, **(db.load(job_id, "render_settings") or {"render_mode": "normal"})})
         cfg = cfg.model_copy(update=frozen.model_dump())
         from .script_settings import freeze
         from .script_settings import snapshot as script_snapshot
@@ -406,7 +407,9 @@ class Pipeline:
                                                                             db.load(job_id, "media_assets"),
                                                                             cfg.youtube_privacy))
                 elif index == 6:
-                    self._save(job_id, folder, "media_license_audit", licensing.audit(db.load(job_id, "media_assets")))
+                    render_report = db.load(job_id, "render_report") or {}
+                    self._save(job_id, folder, "media_license_audit", licensing.audit(
+                        [*db.load(job_id, "media_assets"), *render_report.get("creative_assets", [])]))
                     script = Script.model_validate(db.load(job_id, "script"))
                     if script.source_basis == "verified" and cfg.content_mode != "youtube_insights":
                         evidence = Research.model_validate(db.load(job_id, "research"))

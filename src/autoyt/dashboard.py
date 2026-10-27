@@ -54,6 +54,8 @@ class Dashboard:
         self.scheduler = configure(BackgroundScheduler(timezone=cfg.timezone), cfg)
         self.scheduler_lock = portalocker.Lock(str(cfg.database_path) + ".scheduler.lock", timeout=0)
         self.scheduler_owned = False
+        from .youtube_oauth import YouTubeOAuth
+        self.youtube_auth = YouTubeOAuth(cfg)
 
     def voice_action(self, action, value=None, version=None, page=None):
         import time
@@ -219,6 +221,7 @@ class Dashboard:
             self.notice = f"Run stopped ({type(error).__name__}). Check the job and run doctor."
 
     def snapshot(self):
+        from .creative import library_status
         from .motion import availability
         from .render_settings import record as render_record
         from .schedule_settings import record as schedule_record
@@ -272,6 +275,8 @@ class Dashboard:
                                                 "models": ["gemma3:4b", "qwen3:8b"]}},
                 "motion_renderer": availability(cfg),
                 "voice_preview": self.voice_result,
+                "youtube_authorization": self.youtube_auth.snapshot(),
+                "creative_library": library_status(cfg),
                 "voice_keys": {"gemini": bool(cfg.gemini_api_key.strip()), "elevenlabs": bool(cfg.elevenlabs_api_key.strip())},
                 "daily": {"attempts": len(daily), "auto_attempts": automatic_attempts, "uploaded": len(today_uploads),
                           "failed": sum(j["state"] == "FAILED" for j in daily), "limit": cfg.max_videos_per_day},
@@ -328,13 +333,15 @@ def make_server(app, port):
             return self.headers.get("Host") in (f"127.0.0.1:{self.server.server_port}",
                                                  f"localhost:{self.server.server_port}")
 
-        def send(self, status, body, content_type="application/json; charset=utf-8"):
+        def send(self, status, body, content_type="application/json; charset=utf-8", headers=None):
             if not isinstance(body, bytes):
                 body = json.dumps(body, ensure_ascii=False).encode()
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            for key, value in (headers or {}).items():
+                self.send_header(key, value)
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
@@ -346,6 +353,15 @@ def make_server(app, port):
                 return self.send(403, {"error": "Loopback access only"})
             path = urlsplit(self.path).path
             try:
+                if path == "/api/youtube/callback":
+                    from .youtube_oauth import cookie
+                    if len(self.path) > 8192:
+                        return self.send(400, {"error": "Invalid Google callback"})
+                    try:
+                        app.youtube_auth.finish(urlsplit(self.path).query, self.headers.get("Cookie", ""))
+                    except ValueError as error:
+                        return self.send(400, {"error": str(error)})
+                    return self.send(303, b"", headers={"Location": "/#settings", "Set-Cookie": cookie(clear=True)})
                 if path == "/api/status":
                     return self.send(200, app.snapshot())
                 preview = re.fullmatch(r"/api/voice-preview/([a-f0-9]{16})\.wav", path)
@@ -416,16 +432,38 @@ def make_server(app, port):
             if not self.allowed() or origin not in allowed_origins or not hmac.compare_digest(
                     self.headers.get("X-AutoYT-Token", ""), app.token):
                 return self.send(403, {"error": "Open the dashboard on localhost to use controls"})
-            if self.path != "/api/action":
+            if self.path not in ("/api/action", "/api/creative/import"):
                 return self.send(404, {"error": "Not found"})
             value = {}
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= 32768:
+                if not 0 < length <= (11_000_000 if self.path == "/api/creative/import" else 32768):
                     raise ValueError("Invalid request size")
                 value = json.loads(self.rfile.read(length))
                 if not isinstance(value, dict):
                     raise ValueError("Invalid request")
+                if self.path == "/api/creative/import":
+                    from .creative import import_asset
+                    with app.guard:
+                        if app.busy():
+                            return self.send(409, {"error": "Wait for the current video or voice test before importing"})
+                        try:
+                            with pipeline_lock(app.cfg):
+                                result = import_asset(app.cfg, value)
+                        except ValueError as error:
+                            return self.send(409, {"error": str(error)[:350]})
+                    return self.send(200, result)
+                if value.get("action") in {"youtube_reconnect", "cancel_youtube_auth"}:
+                    from .youtube_oauth import cookie
+                    with app.guard:
+                        if value["action"] == "youtube_reconnect":
+                            if app.busy():
+                                raise ValueError("Wait for the current video or voice test to finish before reconnecting YouTube")
+                            result, browser_cookie = app.youtube_auth.start("http://" + self.headers["Host"])
+                        else:
+                            app.youtube_auth.cancel()
+                            result, browser_cookie = {"message": "Connection cancelled. Existing authorization was kept."}, cookie(clear=True)
+                    return self.send(200, result, headers={"Set-Cookie": browser_cookie})
                 if value.get("action") in {"voice_list", "save_voice", "test_voice"}:
                     try:
                         result = app.voice_action(value["action"], value.get("selection"), value.get("version"), value.get("page"))
@@ -437,7 +475,7 @@ def make_server(app, port):
             except ValidationError as error:
                 return self.send(409, {"error": error.errors()[0]["msg"]})
             except (ValueError, TypeError) as error:
-                if isinstance(value, dict) and value.get("action") in {"save_render", "save_script", "save_schedule"}:
+                if isinstance(value, dict) and value.get("action") in {"save_render", "save_script", "save_schedule", "youtube_reconnect", "cancel_youtube_auth"}:
                     return self.send(409, {"error": str(error)[:350]})
                 return self.send(409, {"error": "Action unavailable. A run may be active, or the job is not retryable."})
             except Exception:

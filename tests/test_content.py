@@ -139,7 +139,10 @@ def test_caption_boundaries(cfg, tmp_path):
     assert all(len(phrase["text"].split()) <= 3 for phrase in result)
     style = next(line for line in ass.splitlines() if line.startswith("Style: Default,")).split(",")
     assert style[7] == "-1"  # Bold text.
-    assert style[15] == "3"  # Dark caption box for contrast over public photos.
+    assert style[15] == "1"  # Subtle outline; the keyword has a separate blue rectangle.
+    assert "\\1c&HFF503D&\\p1" in ass
+    assert " ".join(phrase["text"] for phrase in result) == "A processor executes software instructions clearly."
+    assert "A PROCESSOR EXECUTES" not in ass
     assert "00:00:04,000" in (tmp_path/"subtitles.srt").read_text()
 
 

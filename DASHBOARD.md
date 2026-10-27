@@ -19,3 +19,12 @@ For a server, see [SERVER.md](SERVER.md). Keep the loopback binding and access i
 Unattended writing remains unvalidated on the tested low-memory machine. The dashboard reports failures; the existence of a scheduler does not establish that ten verified stories can be produced every day.
 
 Research failures show per-source outcomes in run details, including blocked HTTP responses and stale or undated pages. Discovery checks up to twelve candidate stories per live run. New feeds broaden coverage, while publication still requires recent official and independent corroboration. Some days have too few verifiable fresh stories to publish.
+
+
+## Reconnect YouTube
+
+In **Production settings → YouTube connection**, click **Reconnect YouTube**. Sign in with Google in the new tab, choose the already configured channel, approve the existing upload/read permissions, and return to AutoYT. If a popup is blocked, use **Continue with Google**. The app verifies the channel before atomically replacing the saved token; cancellation or the wrong channel keeps the old token. Reconnecting never starts a video or upload. After success, retry the saved failed job to resume its upload. Requests expire after ten minutes; Cancel connection allows starting over.
+
+Initial setup still needs the Google desktop OAuth client JSON and a pinned `YOUTUBE_CHANNEL_ID`. Expired access tokens normally refresh automatically; a rejected refresh permission is shown as **Reconnect required**. The button stores the new authorization only in the app instance where it is used. Use localhost on that machine, or forward the same dashboard port over SSH if accessing an existing remote instance. This change does not expose the localhost dashboard publicly or transfer credentials between machines.
+
+Creative visuals and sound: see [creative asset setup](docs/creative-assets.md) for the Video style switches and LottieFiles/Freesound import workflow.

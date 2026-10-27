@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     crf: int = Field(default=20, ge=15, le=28)
     render_mode: Literal["normal", "motion_graphics", "hybrid"] = "normal"
     render_fallback: bool = True
+    motion_icons: bool = True
+    motion_lottie: bool = True
+    sound_effects: bool = True
+    creative_manifest: Path = Path("data/creative/manifest.json")
     remotion_node: str = "node"
     remotion_browser_executable: str = ""
     remotion_concurrency: int = Field(default=1, ge=1, le=4)

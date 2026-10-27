@@ -11,6 +11,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 assets/footage/*.mp4
+assets/footage/*.jpg
+assets/footage/*.jpeg
+assets/footage/*.png
 assets/footage/manifest.json
 *.sqlite
 *.sqlite3

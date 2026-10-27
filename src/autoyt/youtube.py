@@ -3,13 +3,63 @@ import json
 import logging
 import os
 import random
+import tempfile
 import time
 
-from .store import now
+from .store import now, write_json
 
 log = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly"]
+
+
+def authorization_status(cfg):
+    path = cfg.database_path.parent / "youtube-authorization.json"
+    try:
+        status = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except (ValueError, OSError):
+        status = {}
+    return {"state": status.get("state", "unverified") if cfg.youtube_token_file.is_file() else "missing",
+            "checked_at": status.get("checked_at"),
+            "client_present": cfg.youtube_client_secrets_file.is_file(),
+            "channel_pinned": bool(cfg.youtube_channel_id)}
+
+
+def mark_authorization(cfg, state):
+    write_json(cfg.database_path.parent / "youtube-authorization.json", {"state": state, "checked_at": now()})
+
+
+def save_credentials(cfg, credentials):
+    token = cfg.youtube_token_file
+    token.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(dir=token.parent, prefix=".youtube-auth-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(credentials.to_json())
+        os.replace(name, token)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+    mark_authorization(cfg, "connected")
+
+
+def authorized_channel(cfg, credentials, interactive=False, timeout=300):
+    from google_auth_httplib2 import AuthorizedHttp
+    from googleapiclient.discovery import build
+    from googleapiclient.http import build_http
+
+    transport = build_http()
+    transport.timeout = timeout
+    youtube = build("youtube", "v3", http=AuthorizedHttp(credentials, http=transport), cache_discovery=False)
+    channels = youtube.channels().list(part="id,contentDetails", mine=True).execute().get("items", [])
+    if len(channels) != 1:
+        raise RuntimeError("CONFIGURATION: authorize exactly one YouTube channel")
+    channel = channels[0]
+    if cfg.youtube_channel_id and channel["id"] != cfg.youtube_channel_id:
+        raise RuntimeError("CONFIGURATION: OAuth channel does not match YOUTUBE_CHANNEL_ID")
+    if not interactive and not cfg.youtube_channel_id:
+        raise RuntimeError("CONFIGURATION: pin YOUTUBE_CHANNEL_ID before use")
+    return youtube, channel
 
 
 def creator_topics(cfg, channel_ids):
@@ -51,10 +101,7 @@ def service(cfg, interactive=False):
     from google.auth.exceptions import RefreshError, TransportError
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
-    from google_auth_httplib2 import AuthorizedHttp
     from google_auth_oauthlib.flow import InstalledAppFlow
-    from googleapiclient.discovery import build
-    from googleapiclient.http import build_http
 
     token = cfg.youtube_token_file
     credentials = None
@@ -68,10 +115,11 @@ def service(cfg, interactive=False):
             except RefreshError as error:
                 codes = [value.get("error") for value in error.args if isinstance(value, dict)]
                 if "invalid_grant" in codes:
+                    mark_authorization(cfg, "reconnect_required")
                     if interactive:
                         credentials = None
                         break
-                    raise RuntimeError("CONFIGURATION: Google consent revoked or expired; run autoyt auth") from None
+                    raise RuntimeError("CONFIGURATION: Google consent revoked or expired; use Reconnect YouTube in the dashboard or run autoyt auth") from None
                 if not getattr(error, "retryable", False):
                     raise RuntimeError("CONFIGURATION: Google token refresh rejected; check desktop OAuth client setup") from None
                 if attempt == 2:
@@ -90,23 +138,9 @@ def service(cfg, interactive=False):
             raise RuntimeError("CONFIGURATION: Google desktop OAuth client JSON is missing; see SETUP.md")
         credentials = InstalledAppFlow.from_client_secrets_file(
             str(cfg.youtube_client_secrets_file), SCOPES).run_local_server(port=0)
-    token.parent.mkdir(parents=True, exist_ok=True)
-    temporary = token.with_suffix(".tmp")
-    temporary.write_text(credentials.to_json(), encoding="utf-8")
-    os.chmod(temporary, 0o600)
-    temporary.replace(token)
-    transport = build_http()  # Preserves 308 as resumable progress, rather than an HTTP redirect.
-    transport.timeout = 300
-    youtube = build("youtube", "v3", http=AuthorizedHttp(credentials, http=transport),
-                    cache_discovery=False)
-    channels = youtube.channels().list(part="id,contentDetails", mine=True).execute().get("items", [])
-    if len(channels) != 1:
-        raise RuntimeError("CONFIGURATION: authorize exactly one YouTube channel")
-    channel = channels[0]
-    if cfg.youtube_channel_id and channel["id"] != cfg.youtube_channel_id:
-        raise RuntimeError("CONFIGURATION: OAuth channel does not match YOUTUBE_CHANNEL_ID")
-    if not interactive and not cfg.youtube_channel_id:
-        raise RuntimeError("CONFIGURATION: pin YOUTUBE_CHANNEL_ID before use")
+    youtube, channel = authorized_channel(cfg, credentials, interactive)
+    # A wrong-account login must never replace the previous saved authorization.
+    save_credentials(cfg, credentials)
     return youtube, channel
 
 

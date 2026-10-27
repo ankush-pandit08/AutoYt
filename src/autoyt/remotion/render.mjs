@@ -1,7 +1,7 @@
 import {bundle} from '@remotion/bundler';
 import {ensureBrowser, openBrowser, renderMedia, renderStill, selectComposition} from '@remotion/renderer';
 import {createHash} from 'node:crypto';
-import {readFile, mkdir, writeFile, stat} from 'node:fs/promises';
+import {copyFile, readFile, mkdir, writeFile, stat} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createServer} from 'node:net';
@@ -36,6 +36,15 @@ if (process.argv.includes('--setup')) {
       try {cached = (await stat(scene.output)).size > 1000 && (await stat(scene.output+'.complete')).isFile();} catch {}
       if (!cached) {
         const inputProps = {...scene, width: job.width, height: job.height, fps: job.fps};
+        if(scene.background?.kind==='video') {
+          if(!/^[a-f0-9]{64}$/.test(scene.background.cache_key)) throw new Error('Invalid background identity');
+          const mediaFolder=path.join(bundlePath,'__media');
+          await mkdir(mediaFolder,{recursive:true});
+          const name=scene.background.cache_key+'.mp4';
+          await copyFile(scene.background.path,path.join(mediaFolder,name));
+          const {path:localPath,...background}=scene.background;
+          inputProps.background={...background,src:`http://localhost:${port}/__media/${name}`};
+        }
         console.log(`Rendering scene ${scene.index+1}/${scene.total}`);
         const composition = await selectComposition({serveUrl: bundlePath, id: 'TechScene', inputProps, puppeteerInstance: browser, port});
         await renderMedia({serveUrl: bundlePath, composition, inputProps, puppeteerInstance: browser, port,

@@ -205,6 +205,13 @@ def test_shared_repository_host_is_not_sufficient_as_only_official_source(resear
         topic_research.validate_sources([source])
 
 
+def test_github_documentation_is_an_official_source(research_data):
+    source = research_data.sources[0].model_copy(update={
+        "url": "https://docs.github.com/en/copilot/responsible-use/inline-suggestions",
+        "publisher": "microsoft"})
+    assert topic_research.validate_sources([source]) == [source]
+
+
 
 def test_official_research_prompt_is_bounded(research_data):
     source=research_data.sources[0].model_copy(update={"text":" ".join(

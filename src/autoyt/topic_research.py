@@ -32,7 +32,8 @@ def official_only_source(source):
     # their hosting platform is in the primary-domain list.
     host = (urlsplit(source.url).hostname or "").lower()
     shared = {"github.com", "huggingface.co", "npmjs.com"}
-    return source.primary and not any(host == d or host.endswith("." + d) for d in shared)
+    return source.primary and (host == "docs.github.com" or not any(
+        host == d or host.endswith("." + d) for d in shared))
 
 
 def validate_sources(sources):

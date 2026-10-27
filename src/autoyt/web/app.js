@@ -1,3 +1,4 @@
+let creativeImportBusy=false;
 import {TERMINAL,STAGES,MODE_NAMES,nice,jobStatus,filterJobs,runIntent,validateManual,confirmation,evidenceFor,mergeSnapshot,sameSelection,nextRunCountdown} from './ui.mjs';
 
 const $=id=>document.getElementById(id);
@@ -5,6 +6,7 @@ const esc=value=>String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&l
 const formIds={script:['scriptModelForm','scriptModelMessage','scriptSaveState','saveScriptModel','resetScript'],render:['renderForm','renderMessage','renderSaveState','saveRender','resetRender'],voice:['voiceForm','voiceMessage','voiceSaveState','saveVoice','resetVoice']};
 formIds.schedule=['scheduleForm','scheduleMessage','scheduleSaveState','saveSchedule','resetSchedule'];
 const forms=Object.fromEntries(Object.keys(formIds).map(key=>[key,{initialized:false,dirty:false,saving:false,version:null,base:null}]));
+let youtubeAuthSubmitting=false;
 let state=null,token=null,connected=false,refreshPromise=null,requestPending=false,pending=null,pendingContext=null;
 let serverClockOffset=0;
 let jobsSignature='',toastTimer=null,detailId=null,detailRequest=0,detailJob=null;
@@ -44,14 +46,14 @@ $('reconnect').onclick=()=>refresh();
 function settingValue(key) {
   if(key==='schedule') return {times:Array.from({length:6},(_,i)=>$('scheduleTime'+(i+1)).value),timezone:$('scheduleTimezone').value.trim()};
   if(key==='script') return {provider:$('scriptProvider').value,...($('scriptProvider').value==='ollama'?{model:$('localScriptModel').value}:{})};
-  if(key==='render') return {render_mode:$('renderMode').value,render_fallback:$('renderFallback').checked};
+  if(key==='render') return {render_mode:$('renderMode').value,render_fallback:$('renderFallback').checked,motion_icons:$('motionIcons').checked,motion_lottie:$('motionLottie').checked,sound_effects:$('soundEffects').checked};
   return {provider:$('voiceProvider').value,language:$('scriptLanguage').value,
     voice:$('voiceProvider').value==='elevenlabs' ? $('elevenVoice').value:$('localVoice').value.trim()};
 }
 function applySetting(key,value) {
   if(key==='schedule') {value.times.forEach((time,i)=>$('scheduleTime'+(i+1)).value=time);$('scheduleTimezone').value=value.timezone;}
   else if(key==='script') {$('scriptProvider').value=value.provider;$('localScriptModel').value=value.model || 'gemma3:4b';}
-  else if(key==='render') {$('renderMode').value=value.render_mode;$('renderFallback').checked=value.render_fallback;}
+  else if(key==='render') {$('renderMode').value=value.render_mode;$('renderFallback').checked=value.render_fallback;$('motionIcons').checked=value.motion_icons ?? true;$('motionLottie').checked=value.motion_lottie ?? true;$('soundEffects').checked=value.sound_effects ?? true;}
   else {
     Object.assign(draftVoices,state.voice_settings.voices);
     $('voiceProvider').value=value.provider;$('scriptLanguage').value=value.language;$('localVoice').value=value.voice;voiceProvider=value.provider;
@@ -77,6 +79,7 @@ function dirty(key) {
 }
 function updateControls() {
   const unavailable=!canAct();
+  renderYoutubeAuth();renderCreativeLibrary();
   for(const id of ['run','preview','customRun','customPreview']) $(id).disabled=unavailable || busy();
   $('toggle').disabled=unavailable || requestPending;
   $('reconnect').disabled=!!refreshPromise;
@@ -120,7 +123,7 @@ for(const key of Object.keys(forms)) {
 }
 $('scheduleForm').oninput=()=>dirty('schedule');
 $('scriptProvider').onchange=$('localScriptModel').onchange=()=>{dirty('script');updateScriptModelInfo();};
-$('renderMode').onchange=$('renderFallback').onchange=()=>dirty('render');
+$('renderMode').onchange=$('renderFallback').onchange=$('motionIcons').onchange=$('motionLottie').onchange=$('soundEffects').onchange=()=>dirty('render');
 function updateScriptModelInfo() {
   const info=state?.script_providers?.[$('scriptProvider').value];
   $('localScriptModelRow').hidden=$('scriptProvider').value!=='ollama';
@@ -183,7 +186,7 @@ function render() {
   $('scheduleCaption').textContent=`${cfg.slots.length} daily slots · ${cfg.timezone}${cfg.daily_script_batch?' · Scripts prepared at '+cfg.morning_plan_time:''}`;
   const nextSlot=s.next_run?new Date(s.next_run).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',timeZone:cfg.timezone}):null;
   $('slots').innerHTML=cfg.slots.map(slot=>`<span class="slot ${slot===nextSlot?'next':''}">${esc(slot)}${slot===nextSlot?'<small>Next</small>':''}</span>`).join('');
-  const config=[['Topic discovery',youtubeMode()?'YouTube inspiration + web research':'RSS / Trends + source checks'],['Script model',`${nice(s.script_settings.selection.provider)} · ${cfg.model}`],['Narration',`${language()} · ${cfg.voice}`],['Video style',MODE_NAMES[s.render_settings.selection.render_mode]],['Topic focus',cfg.topic_focus==='ai_coding'?'AI, LLMs & coding':'Technology insights'],['Visuals',[cfg.public_images?'Wikimedia Commons':'',cfg.pixabay?'Pixabay':'',cfg.pexels?'Pexels':'','Original graphics'].filter(Boolean).join(' · ')],['Google authorization',cfg.token_present?'Token saved · validity checked on use':'Setup required'],['Publishing',cfg.uploads_enabled?`${nice(cfg.visibility)} uploads`:'Disabled']];
+  const config=[['Topic discovery',youtubeMode()?'YouTube inspiration + web research':'RSS / Trends + source checks'],['Script model',`${nice(s.script_settings.selection.provider)} · ${cfg.model}`],['Narration',`${language()} · ${cfg.voice}`],['Video style',MODE_NAMES[s.render_settings.selection.render_mode]],['Topic focus',cfg.topic_focus==='ai_coding'?'AI, LLMs & coding':'Technology insights'],['Visuals',[cfg.public_images?'Wikimedia Commons':'',cfg.pixabay?'Pixabay':'',cfg.pexels?'Pexels':'','Original graphics'].filter(Boolean).join(' · ')],['Google authorization',s.youtube_authorization?.state==='reconnect_required'?'Reconnect required · see YouTube connection':s.youtube_authorization?.state==='connected'?'Channel verified':cfg.token_present?'Token saved · validity checked on use':'Setup required'],['Publishing',cfg.uploads_enabled?`${nice(cfg.visibility)} uploads`:'Disabled']];
   $('configuration').innerHTML=config.map(([key,value])=>`<dt>${esc(key)}</dt><dd>${esc(value)}</dd>`).join('');
   $('renderAvailability').textContent=s.motion_renderer.ready?'Local motion renderer ready. Hybrid keeps available B-roll.':'Motion renderer needs setup. Normal works without it; enabled fallback is recorded per run.';
   $('events').innerHTML=s.events.length?s.events.map(event=>`<div class="event"><time>${esc(date(event.created_at))}<br>${esc(time(event.created_at))}</time><div><p>${badge(event.state)} ${esc(event.message)}</p><small>${esc(event.job_id)}</small></div></div>`).join(''):'<p class="help">Run updates will appear here.</p>';
@@ -273,7 +276,7 @@ async function details(id) {
   try {
     const data=await api(`/api/jobs/${id}`);
     if(request!==detailRequest || detailId!==id || !$('details').open) return;
-    const evidence=evidenceFor(data),assets=data.media_assets || [],report=data.render_report;
+    const evidence=evidenceFor(data),assets=[...(data.media_assets || []),...(data.render_report?.creative_assets || [])],report=data.render_report;
     const unchecked=data.script?.source_basis==='user_input' || data.source_brief?.basis==='user_input';
     const sourceNote=unchecked?'Your supplied narration is not independently fact checked.':evidence.status==='official_source_only'?'Official company claims are attributed; independent corroboration was not established.':evidence.sources.length?'These retrieved sources support the script. Topic references are listed separately.':'No completed evidence record is available yet.';
     $('detailBody').innerHTML=`<p class="detail-title">${esc(data.script?.title || data.topic || 'Preparing a technology story')}</p><div class="detail-status">${badge(data)}<span class="detail-code">${esc(id)}${data.dry_run?' · Local preview only':''}</span></div>${data.error?`<p class="error-text">${esc(data.error)}</p>`:''}${detailJob?.has_video?`<video class="detail-video" controls preload="metadata" src="/media/${id}/final.mp4" aria-label="Saved video preview"></video>`:''}<div class="detail-links">${data.youtube?.url?link(data.youtube.url,'Open uploaded video on YouTube'):''}${data.state==='FAILED'?`<button class="button secondary" data-retry="${id}" ${busy() || !canAct()?'disabled':''}>Retry saved checkpoint</button>`:''}</div><div class="detail-section"><h3>Production settings</h3><p>Requested style: ${esc(MODE_NAMES[data.render_settings?.render_mode || 'normal'])}<br>Rendered style: ${report?.status==='completed'?esc(MODE_NAMES[report.effective_mode]):'Not completed yet'}${data.script_settings?`<br>Script model: ${esc(nice(data.script_settings.provider))} · ${esc(data.script_settings.model)}`:''}</p>${report?.fallback_reason?`<p class="notice warning">${esc(report.fallback_reason)}</p>`:''}</div><div class="detail-section"><h3>Narration</h3><p>${esc(data.script?.script || 'The script has not completed yet.')}</p></div><div class="detail-section"><h3>Evidence sources</h3><p class="detail-source-note">${esc(sourceNote)}</p><ul>${evidence.sources.map(source=>`<li>${link(source.url,source.title || source.publisher || 'Source')}${source.primary?' · Official source':''}</li>`).join('')}</ul></div>${evidence.inspiration.length?`<div class="detail-section"><h3>Topic inspiration</h3><p class="detail-source-note">Creator video metadata suggests the topic; it is separate from web evidence.</p><ul>${evidence.inspiration.map(source=>`<li>${link(source.url,source.title || 'Topic reference')}</li>`).join('')}</ul></div>`:''}${data.research_attempts?.length?`<details class="detail-section"><summary>Other topics checked (${data.research_attempts.length})</summary><ul>${data.research_attempts.map(item=>`<li>${esc(item.topic)}<br>${esc(item.reason)}</li>`).join('')}</ul></details>`:''}<details class="detail-section"><summary>Visual credits & licenses</summary><p>${data.media_license_audit?.passed?'Recorded license checks passed.':'License checks have not completed.'} Provider restrictions and third-party rights still apply.</p><ul>${assets.length?assets.map(asset=>`<li>${esc(asset.attribution || asset.provider || 'Original graphics')}<br>${esc(asset.license)} ${asset.source_url?link(asset.source_url,'Source'):''}</li>`).join(''):'<li>No visuals have been selected.</li>'}</ul></details><div class="detail-section"><h3>Media quality</h3><p>${data.validation?.passed?'Passed automated dimensions, codec, duration, audio and caption checks.':'No completed media validation.'}</p><p class="detail-source-note">Caption phrases use estimated timing within measured narration scenes.</p></div>`;
@@ -375,3 +378,68 @@ async function boot() {
   document.addEventListener('visibilitychange',()=>{if(!document.hidden) refresh();});
 }
 boot();
+
+function renderYoutubeAuth() {
+  const auth=state?.youtube_authorization;
+  if(!auth) {$('youtubeAuthMessage').textContent='Reconnect to load YouTube authorization status.';return;}
+  const labels={connected:'Connected',unverified:'Saved · not checked',missing:'Not connected',reconnect_required:'Reconnect required',waiting:'Waiting for Google',verifying:'Verifying channel',failed:'Connection failed',expired:'Request expired',cancelled:'Cancelled'};
+  const pending=['waiting','verifying'].includes(auth.state);
+  $('youtubeAuthState').textContent=labels[auth.state] || 'Check connection';
+  $('youtubeAuthState').className=`badge ${auth.state==='connected'?'success':pending?'working':['reconnect_required','failed','expired','missing'].includes(auth.state)?'warning':'neutral'}`;
+  $('youtubeAuthMessage').textContent=auth.message || (auth.state==='reconnect_required'?'Google rejected the saved permission. Reconnect, then retry the saved video.':auth.state==='connected'?'Your configured YouTube channel was verified.':auth.state==='missing'?'Connect the configured YouTube channel before uploading.':'Authorization is saved; validity is checked when YouTube is used.');
+  if(!auth.client_present) $('youtubeAuthMessage').textContent='Google OAuth client JSON is missing. Add the configured client file before reconnecting.';
+  else if(!auth.channel_pinned) $('youtubeAuthMessage').textContent='Complete initial channel setup and configure YOUTUBE_CHANNEL_ID before using this reconnect button.';
+  $('reconnectYoutube').disabled=!canAct() || busy() || youtubeAuthSubmitting || pending || !auth.client_present || !auth.channel_pinned;
+  $('cancelYoutubeAuth').hidden=auth.state!=='waiting';
+  $('cancelYoutubeAuth').disabled=!canAct() || youtubeAuthSubmitting;
+  if(!pending) {$('youtubeAuthLink').hidden=true;$('youtubeAuthLink').removeAttribute('href');}
+}
+$('reconnectYoutube').onclick=async()=>{
+  if(!canAct() || busy() || youtubeAuthSubmitting) return;
+  const popup=window.open('about:blank','_blank');
+  if(popup) popup.opener=null;
+  youtubeAuthSubmitting=true;renderYoutubeAuth();
+  try {
+    const result=await post({action:'youtube_reconnect'}),url=new URL(result.authorization_url);
+    if(url.protocol!=='https:' || url.hostname!=='accounts.google.com') throw new Error('Google sign-in link was rejected.');
+    $('youtubeAuthLink').href=url.href;$('youtubeAuthLink').hidden=false;
+    if(popup) popup.location.href=url.href;
+    toast('Finish Google sign-in in the other tab, then return here.');
+    await refresh();
+  } catch(error) {if(popup) popup.close();toast(error.message,'error');}
+  finally {youtubeAuthSubmitting=false;renderYoutubeAuth();}
+};
+$('cancelYoutubeAuth').onclick=async()=>{
+  youtubeAuthSubmitting=true;renderYoutubeAuth();
+  try {await post({action:'cancel_youtube_auth'});await refresh();}
+  catch(error) {toast(error.message,'error');}
+  finally {youtubeAuthSubmitting=false;renderYoutubeAuth();}
+};
+
+function renderCreativeLibrary() {
+  const lib=state?.creative_library;
+  $('creativeLibrarySummary').textContent=lib?`${lib.animations} imported animations · ${lib.sounds} imported sounds · original defaults included`:'Original animation and sound effects included.';
+  $('creativeLibraryItems').innerHTML=(lib?.items || []).map(item=>`<li><strong>${esc(item.name)}</strong> · ${esc(item.kind==='animation'?'Animation':'Sound')}<br>${esc(item.attribution)}<br>${esc(item.license)}</li>`).join('');
+  $('importCreative').disabled=!canAct() || busy() || creativeImportBusy;
+}
+$('creativeKind').onchange=()=>{
+  const sound=$('creativeKind').value==='sound_effect';
+  $('creativeFile').value='';$('creativeFile').accept=sound?'.wav,.mp3,.ogg':'.json';
+  $('creativeFileHelp').textContent=sound?'WAV, MP3 or OGG, up to 8 MB and 5 seconds.':'Vector-only JSON, up to 2 MB. No external images, fonts or expressions.';
+  $('creativeSource').placeholder=sound?'https://freesound.org/people/…/sounds/…/':'https://lottiefiles.com/free-animation/…';
+  $('creativeLicenseLabel').textContent=sound?'I checked that this sound is under CC0 (not CC BY or CC BY-NC).':'I checked that this asset is under the Lottie Simple License.';
+  $('creativeRights').checked=false;
+};
+$('creativeImportForm').onsubmit=async event=>{
+  event.preventDefault();if(!canAct() || busy() || creativeImportBusy || !$('creativeImportForm').reportValidity()) return;
+  const file=$('creativeFile').files[0],sound=$('creativeKind').value==='sound_effect';
+  if(!file || file.size>(sound?8000000:2000000)) {$('creativeImportMessage').textContent='File exceeds the size limit.';return;}
+  creativeImportBusy=true;renderCreativeLibrary();$('creativeImportMessage').textContent='Checking and importing locally…';
+  try {
+    const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(new Error('Could not read the file.'));reader.readAsDataURL(file);});
+    const body={kind:$('creativeKind').value,data,name:$('creativeName').value.trim(),author:$('creativeAuthor').value.trim(),source_url:$('creativeSource').value.trim(),tags:$('creativeTags').value.split(',').map(t=>t.trim()).filter(Boolean),rights_confirmed:$('creativeRights').checked,license:sound?'CC0-1.0':'Lottie Simple License'};
+    const result=await api('/api/creative/import',{method:'POST',headers:{'Content-Type':'application/json','X-AutoYT-Token':token},body:JSON.stringify(body)},45000);
+    state.creative_library=result.creative_library;renderCreativeLibrary();$('creativeImportMessage').textContent=result.message;$('creativeFile').value='';$('creativeRights').checked=false;
+  } catch(error) {$('creativeImportMessage').textContent=error.message;}
+  finally {creativeImportBusy=false;renderCreativeLibrary();}
+};
