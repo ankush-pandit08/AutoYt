@@ -49,7 +49,7 @@ def test_short_term_limit_can_recover_during_research(cfg, monkeypatch):
     monkeypatch.setattr(limits, "pause", lambda delay: waits.append(delay))
     with limits.research_budget(240):
         assert LLM(cfg).structured(WebSourceReview, "Check source", {}).credible
-    assert waits == [2.25]
+    assert waits == [3]
     assert calls[0]["max_completion_tokens"] == 384
     assert calls[0]["reasoning_effort"] == "none"
 
@@ -76,7 +76,7 @@ def test_wait_respects_the_shared_research_deadline(cfg, monkeypatch):
     def post(url, **kwargs):
         return httpx.Response(429, headers={"retry-after": "50"}, request=httpx.Request("POST", url))
     monkeypatch.setattr(httpx, "post", post)
-    with pytest.raises(RuntimeError, match="Research time limit"):
+    with pytest.raises(RuntimeError, match="Groq quota/rate limit reached.*50 seconds"):
         with limits.research_budget(30):
             LLM(cfg).structured(Audit, "check", {})
 

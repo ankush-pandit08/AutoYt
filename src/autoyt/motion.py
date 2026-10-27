@@ -17,6 +17,8 @@ def availability(cfg):
                     for package in ("remotion", "@remotion/renderer", "@remotion/bundler"))
     browser = any(path.is_file() for path in (PROJECT/"node_modules/.remotion/chrome-headless-shell").glob(
         "*/*/chrome-headless-shell*"))
+    if cfg.remotion_browser_executable:
+        browser = bool(shutil.which(cfg.remotion_browser_executable) or Path(cfg.remotion_browser_executable).is_file())
     return {"ready": bool(node and installed and browser), "node": bool(node), "packages": installed, "browser": browser}
 
 
@@ -61,6 +63,7 @@ def render_clips(cfg, script, segments, assets, folder):
         selected.append({**scene, "output": str((clip_folder / (fingerprint+".mp4")).resolve())})
     request = {"width": cfg.video_width, "height": cfg.video_height, "fps": cfg.video_fps,
                "crf": cfg.crf, "concurrency": cfg.remotion_concurrency, "scenes": selected,
+               "browserExecutable": cfg.remotion_browser_executable or None,
                "bundleCache": str((cfg.cache_dir / "remotion-bundles").resolve()),
                "receipt": str((clip_folder / "receipt.json").resolve()), "stills": True}
     write_json(clip_folder / "request.json", request)

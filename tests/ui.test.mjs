@@ -63,3 +63,13 @@ test('countdown uses absolute instants and handles paused, due and next-day runs
   assert.equal(nextRunCountdown('2026-10-22T09:30:00+05:30',now),'Run due · checking availability');
   assert.equal(nextRunCountdown(null,now,false),'Automatic mode paused');
 });
+
+
+test('schedule selections compare saved times by value when drafts are reverted',()=>{
+  const saved={times:['09:30','11:18','13:06','14:54','16:42','18:30'],timezone:'Asia/Kolkata'};
+  assert.equal(sameSelection(saved,structuredClone(saved)),true);
+  const draft=structuredClone(saved);draft.times[0]='10:00';
+  assert.equal(sameSelection(saved,draft),false);
+  draft.times[0]='09:30';assert.equal(sameSelection(saved,draft),true);
+  assert.equal(sameSelection(saved,{...saved,times:{...saved.times}}),false);
+});

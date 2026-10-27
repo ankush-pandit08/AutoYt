@@ -58,6 +58,32 @@ def verify_evidence(evidence):
     return sources
 
 
+def audit_context(evidence):
+    """Bound source excerpts while keeping the context around every exact quote.
+
+    Original documents and deterministic quotation checks remain unchanged.
+    """
+    result = []
+    for source in evidence.sources:
+        spans = []
+        for claim in evidence.claims:
+            for quote in claim.evidence:
+                if quote.source_url != source.url:
+                    continue
+                start = source.text.find(quote.quote)
+                if start >= 0:
+                    spans.append((max(0, start - 300), min(len(source.text), start + len(quote.quote) + 300)))
+        merged = []
+        for start, end in sorted(set(spans)):
+            if merged and start <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+            else:
+                merged.append((start, end))
+        text = "\n[Separate source excerpt]\n".join(source.text[a:b] for a, b in merged) if merged else source.text[:600]
+        result.append({"url": source.url, "text": text})
+    return result
+
+
 def select_official_claims(llm, sources, topic):
     _, lookup = research.passages(sources)
     ranked = sorted(((k,v) for k,v in lookup.items() if official_only_source(v[0])),
@@ -124,7 +150,14 @@ def select_article_claims(llm, sources, topic, folder=None):
                 pairs.append((score, left, right))
     pairs.sort(reverse=True)
     local = getattr(getattr(llm, "cfg", None), "llm_provider", None) == "ollama"
-    pairs = pairs[:4 if local else 16]
+    # Complete quotation pairs, bounded before sending them to a free-tier model.
+    selected, size = [], 0
+    for pair in pairs:
+        amount = len(eligible[pair[1]][1]) + len(eligible[pair[2]][1])
+        if len(selected) < (4 if local else 16) and size + amount <= (3000 if local else 10000):
+            selected.append(pair)
+            size += amount
+    pairs = selected
     if not pairs:
         raise ValueError("No corroborating article passages about this creator topic")
     references = {f"pair{i}": (a,b) for i,(_,a,b) in enumerate(pairs)}
@@ -317,7 +350,7 @@ def gather(cfg, web, llm, topic, folder=None):
         "attributed company claims, not independent confirmation of performance. Do not add facts from memory.",
         {"topic": topic.title, "evidence_basis": evidence_basis(evidence), "evidence": ai.writing_evidence(evidence),
          "article_context": compact_context(evidence) if cfg.llm_provider == "ollama" else
-                            [{"url": s.url, "text": s.text[:5000]} for s in sources],
+                            audit_context(evidence),
          "current_date_utc": datetime.now(timezone.utc).date().isoformat()})
     if folder:
         write_json(folder / "source_documents.json", [s.model_dump(mode="json") for s in sources])
