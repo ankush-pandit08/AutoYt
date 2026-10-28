@@ -17,8 +17,24 @@ def local_queries(scene):
     queries = [scene.visual_query]
     tokens = words(scene.visual_query + " " + scene.narration)
     if tokens & {"ai", "llm", "llms", "assistant", "coding", "programming", "code"}:
-        queries.extend(["person computer", "computer programming", "laptop keyboard"])
+        queries.extend(["ai neural network", "computer programming", "computer coding", "laptop keyboard"])
+    if tokens & {"robot", "robots", "robotic", "robotics"}:
+        queries.append("robotic arm automation")
+    if tokens & {"server", "servers", "cloud", "datacenter", "database"}:
+        queries.append("server data cloud")
+    if tokens & {"phone", "smartphone", "mobile"}:
+        queries.append("smartphone mobile screen")
+    if tokens & {"gpu", "graphics"}:
+        queries.append("gpu graphics card")
     return queries
+
+
+def local_score(scene, entry):
+    tags = words(" ".join(entry.get("tags", [])))
+    direct = len(words(scene.visual_query) & tags)
+    matches = [len(words(query) & tags) for query in local_queries(scene)[1:]]
+    # Exact scene subjects outrank generic AI/coding fallbacks, including photos.
+    return max([direct * 3 if direct >= 2 else 0] + [n if n >= 2 else 0 for n in matches])
 
 
 def choose_media(cfg, web, script):
@@ -35,11 +51,15 @@ def choose_media(cfg, web, script):
     pixabay_failed = False
     public_queries, public_used = set(), set()
     public_failed = False
-    for scene in script.scenes:
+    for index, scene in enumerate(script.scenes):
         asset = {"kind": "graphics", "license": "Original AutoYT graphics", "query": scene.visual_query,
                  "attribution": "Original explanatory graphics", "path": None, "source_url": None}
-        # Prefer moving footage before photographs; preserve distinct assets across scenes.
-        for entry in sorted(local, key=lambda item: item.get("kind") == "stock_image"):
+        # Match the subject first, prefer video on ties, and vary ties across stories.
+        ranked = sorted(local, key=lambda item: (-local_score(scene, item), item.get("kind") == "stock_image",
+            hashlib.sha256(f"{script.title}:{index}:{item.get('source_url')}".encode()).hexdigest()))
+        for entry in ranked:
+            if cfg.face_free_media and entry.get("face_free") is not True:
+                continue
             if entry.get("license") == "CC-BY-4.0":
                 continue  # Empty upload descriptions cannot carry mandatory attribution.
             if not entry.get("license") or not entry.get("source_url") or not entry.get("permitted_use"):
@@ -53,8 +73,7 @@ def choose_media(cfg, web, script):
                 continue
             if str(path) in used_assets or entry["source_url"] in used_assets:
                 continue
-            if path.is_file() and any(len(words(query) & words(" ".join(entry.get("tags", [])))) >= 2
-                                      for query in local_queries(scene)):
+            if path.is_file() and local_score(scene, entry):
                 try:
                     if entry.get("kind") == "stock_image":
                         from PIL import Image
@@ -71,7 +90,7 @@ def choose_media(cfg, web, script):
                     break
                 except Exception:
                     continue
-        if asset["path"] is None and cfg.pexels_api_key:
+        if asset["path"] is None and cfg.pexels_api_key and not cfg.face_free_media:
             try:
                 from urllib.parse import urlencode
                 data = json.loads(web.get("https://api.pexels.com/v1/videos/search?" + urlencode(
@@ -101,7 +120,7 @@ def choose_media(cfg, web, script):
                     break
             except Exception as error:
                 log.warning("Pexels unavailable (%s); using original graphics", type(error).__name__)
-        if asset["path"] is None and cfg.pixabay_api_key and not pixabay_failed:
+        if asset["path"] is None and cfg.pixabay_api_key and not pixabay_failed and not cfg.face_free_media:
             query = scene.visual_query
             if query in pixabay_queries or len(pixabay_queries) < 6:
                 pixabay_queries.add(query)
@@ -112,7 +131,7 @@ def choose_media(cfg, web, script):
                 except Exception as error:
                     pixabay_failed = True
                     log.warning("Pixabay unavailable (%s); continuing visual fallbacks", type(error).__name__)
-        if asset["path"] is None and cfg.enable_public_images and not public_failed:
+        if asset["path"] is None and cfg.enable_public_images and not public_failed and not cfg.face_free_media:
             query = scene.visual_query
             if query in public_queries or len(public_queries) < 4:
                 public_queries.add(query)

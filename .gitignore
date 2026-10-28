@@ -15,6 +15,7 @@ assets/footage/*.jpg
 assets/footage/*.jpeg
 assets/footage/*.png
 assets/footage/manifest.json
+assets/footage/manifest.json.backup
 *.sqlite
 *.sqlite3
 *.db

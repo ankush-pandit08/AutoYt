@@ -118,6 +118,7 @@ class Settings(BaseSettings):
                                   "git-scm.com", "atlassian.com", "tesla.com", "spacex.com", "meta.com",
                                   "about.meta.com", "netflix.com", "research.netflix.com", "elevenlabs.io"]
     local_media_manifest: Path = Path("assets/footage/manifest.json")
+    face_free_media: bool = True
 
     @model_validator(mode="after")
     def check(self):
