@@ -29,8 +29,8 @@ def test_import_selection_and_license_audit(cfg, tmp_path):
     assert licensing.audit(records)["assets"][0]["provider"] == "LottieFiles"
     selected, credit = creative.select_animation(cfg, "new cloud coding tools", records)
     assert selected == animation() and credit["source_url"].startswith("https://lottiefiles.com/")
-    _, original = creative.select_animation(cfg, "smartphone battery", records)
-    assert original["license"] == "Original AutoYT graphics"
+    assert creative.select_animation(cfg, "smartphone battery", records) == (None, None)
+    assert creative.select_animation(cfg, "cloud coding tools", []) == (None, None)
     creative.import_asset(cfg, request())
     assert len(creative.catalog(cfg)) == 1  # Same bytes never duplicate the library.
     Path(records[0]["path"]).write_text('{}')

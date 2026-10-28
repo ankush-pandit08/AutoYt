@@ -271,11 +271,13 @@ $('filter').onchange=$('searchJobs').oninput=renderJobs;
 $('jobs').onclick=event=>{const button=event.target.closest('[data-job]');if(button) details(button.dataset.job);if(event.target.closest('#clearSearch')){$('searchJobs').value='';$('filter').value='all';renderJobs();$('searchJobs').focus();}};
 
 function scriptUsage(data) {
+  const voice=data.voice_provider_usage;
+  const voiceNotice=voice?`<div class="detail-section"><h3>Voice provider used</h3><p>${esc(nice(voice.active_provider))} · ${esc(voice.active_voice)}</p><p class="detail-source-note">Automatic local English male voice backup. ${esc(voice.reason)}</p></div>`:'';
   const calls=data.script_provider_usage?.calls || [];
   const used=[...new Set(calls.filter(c=>c.status==='success').map(c=>`${nice(c.provider)} · ${c.model}`))];
   const unavailable=[...new Set(calls.filter(c=>c.status==='unavailable').map(c=>nice(c.provider)))];
-  if(!calls.length) return '';
-  return `<div class="detail-section"><h3>Script providers used</h3><p>${used.length?used.map(esc).join('<br>'):'Waiting for an available provider.'}</p>${unavailable.length?`<p class="detail-source-note">Automatic backup after ${esc(unavailable.join(', '))} became unavailable.</p>`:''}</div>`;
+  if(!calls.length) return voiceNotice;
+  return `<div class="detail-section"><h3>Script providers used</h3><p>${used.length?used.map(esc).join('<br>'):'Waiting for an available provider.'}</p>${unavailable.length?`<p class="detail-source-note">Automatic backup after ${esc(unavailable.join(', '))} became unavailable.</p>`:''}</div>${voiceNotice}`;
 }
 
 async function details(id) {

@@ -42,8 +42,10 @@ def checked(response):
         message = "ElevenLabs is temporarily unavailable. Try again later"
     else:
         message = "ElevenLabs rejected the request. Check model, voice and account access"
-    # Never echo remote bodies, request headers, narration or credentials.
-    raise RuntimeError(message + " (HTTP " + str(response.status_code) + "). No provider was switched")
+    # These messages are our own diagnostics, never remote bodies or credentials.
+    category = "TRANSIENT" if response.status_code == 429 or response.status_code >= 500 or code in {
+        "quota_exceeded", "insufficient_credits", "character_limit_exceeded"} else "CONFIGURATION"
+    raise RuntimeError(category + ": " + message + " (HTTP " + str(response.status_code) + ")")
 
 
 def voices(cfg, page=None):
@@ -88,9 +90,9 @@ def voices(cfg, page=None):
         items.sort(key=lambda v: (not v["recommended"], v["name"].lower()))
         result = {"voices": items, "next_page": data.get("next_page_token") if data.get("has_more") else None}
     except httpx.TransportError:
-        raise RuntimeError("ElevenLabs connection failed. Check connectivity and try again") from None
+        raise RuntimeError("TRANSIENT: ElevenLabs connection failed. Check connectivity and try again") from None
     except (ValueError, KeyError, TypeError):
-        raise RuntimeError("ElevenLabs returned an invalid voice list. Try again later") from None
+        raise RuntimeError("TRANSIENT: ElevenLabs returned an invalid voice list. Try again later") from None
     if len(_catalog) > 30:
         _catalog.clear()
     _catalog[key] = (time.monotonic(), result)
@@ -140,7 +142,7 @@ def segment(cfg, text, path):
         )
     except httpx.TransportError:
         raise RuntimeError(
-            "ElevenLabs connection failed. No automatic retry was made to avoid duplicate credit use"
+            "TRANSIENT: ElevenLabs connection failed. No automatic retry was made to avoid duplicate credit use"
         ) from None
     raw = response.content
     if not raw or len(raw) % 2 or len(raw) > 24000 * 2 * 120:

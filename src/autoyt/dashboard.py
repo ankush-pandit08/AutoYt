@@ -314,7 +314,7 @@ class Dashboard:
         if not JOB_ID.fullmatch(job_id):
             raise ValueError("Invalid job")
         result = self.store.get(job_id)
-        for kind in ("request", "render_settings", "render_report", "script_settings", "script_provider_usage", "script", "research", "source_brief", "editorial", "content_package", "research_attempts", "media_assets", "media_license_audit", "validation", "youtube"):
+        for kind in ("request", "render_settings", "render_report", "script_settings", "script_provider_usage", "voice_provider_usage", "script", "research", "source_brief", "editorial", "content_package", "research_attempts", "media_assets", "media_license_audit", "validation", "youtube"):
             value = self.store.load(job_id, kind)
             if kind == "media_assets" and value:
                 value = [{k: v for k, v in asset.items() if k != "path"} for asset in value]

@@ -187,9 +187,8 @@ def select_animation(cfg, text, items):
     score, selected = max(candidates, key=lambda pair: pair[0], default=(0, None))
     if score:
         return validate_lottie(json.loads(Path(selected["path"]).read_text(encoding="utf-8"))), selected
-    return json.loads((BUILTIN / "tech-pulse.json").read_text()), {
-        "kind": "animation", "license": "Original AutoYT graphics", "attribution": "AutoYT original vector pulse",
-        "source_url": None}
+    # Unmatched scenes stay clean; do not overlay the generic looping pulse ring.
+    return None, None
 
 
 def sound_bus(cfg, segments, folder, items):

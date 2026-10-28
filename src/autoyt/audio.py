@@ -1,4 +1,6 @@
 import json
+import importlib.util
+import logging
 import platform
 import re
 import subprocess
@@ -49,6 +51,14 @@ class Speech:
     def __init__(self, cfg):
         self.cfg = cfg
         self.pipeline = None
+        self.local_fallback = None
+        self.usage = None
+
+    def fallback_ready(self):
+        return (self.cfg.tts_fallback_enabled and self.cfg.narration_language == "en"
+                and self.cfg.kokoro_model.is_file() and self.cfg.kokoro_voices.is_file()
+                and importlib.util.find_spec("kokoro_onnx") is not None
+                and importlib.util.find_spec("onnxruntime") is not None)
 
     def segment(self, text, path):
         if self.cfg.tts_engine == "indicf5":
@@ -99,6 +109,33 @@ class Speech:
                  "-File", ps, "-TextFile", textfile.resolve(), "-OutputFile", path.resolve()])
 
     def synthesize(self, script, folder):
+        from .store import write_json
+        usage_path = folder / "voice_provider_usage.json"
+        if self.local_fallback is None and self.cfg.tts_engine in {"elevenlabs", "gemini"}:
+            saved = json.loads(usage_path.read_text(encoding="utf-8")) if usage_path.is_file() else {}
+            if (saved.get("requested_provider") == self.cfg.tts_engine
+                    and saved.get("requested_voice") == self.cfg.tts_voice
+                    and saved.get("active_provider") == "kokoro" and self.fallback_ready()):
+                self.usage = saved
+                self.local_fallback = Speech(self.cfg.model_copy(update={"tts_engine": "kokoro", "tts_voice": "am_michael"}))
+        if self.local_fallback is not None:
+            return self.local_fallback._synthesize(script, folder)
+        try:
+            return self._synthesize(script, folder)
+        except RuntimeError as error:
+            if (self.cfg.tts_engine not in {"elevenlabs", "gemini"} or not self.fallback_ready()
+                    or str(error).split(":", 1)[0] not in {"TRANSIENT", "CONFIGURATION"}):
+                raise
+            self.usage = {"requested_provider": self.cfg.tts_engine, "requested_voice": self.cfg.tts_voice,
+                          "active_provider": "kokoro", "active_voice": "am_michael", "language": "en",
+                          "reason": str(error)[:300]}
+            # Restart every segment with one voice; never mix hosted and local narration.
+            write_json(usage_path, self.usage)
+            logging.getLogger(__name__).warning("Hosted narration unavailable; using local English male voice for this job")
+            self.local_fallback = Speech(self.cfg.model_copy(update={"tts_engine": "kokoro", "tts_voice": "am_michael"}))
+            return self.local_fallback._synthesize(script, folder)
+
+    def _synthesize(self, script, folder):
         segments, arrays, offset = [], [], 0.0
         if self.cfg.tts_engine == "indicf5":
             from .indicf5_speech import generate

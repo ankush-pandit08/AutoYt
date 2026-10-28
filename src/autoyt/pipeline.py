@@ -18,7 +18,7 @@ from . import (
     youtube,
     youtube_content,
 )
-from .limits import research_budget, research_duration
+from .limits import ResearchTimeout, research_budget, research_duration
 from .manual import ManualRequest, find_candidates
 from .models import Research, Script, Topic
 from .net import Web
@@ -378,6 +378,8 @@ class Pipeline:
                     attempts = []
                     for revision in range(narration_duration.MAX_REVISIONS + 1):
                         segments = speech.synthesize(script, folder)
+                        if getattr(speech, "usage", None):
+                            self._save(job_id, folder, "voice_provider_usage", speech.usage)
                         duration = segments[-1]["end"]
                         attempts.append({"attempt": revision + 1, "seconds": duration,
                                          "words": len(script.script.split()),
@@ -463,7 +465,7 @@ class Pipeline:
             # Our own ValueErrors contain quality diagnostics only.
             if isinstance(error, ValueError) and type(error).__module__ == "builtins":
                 safe += str(error)[:300]
-            elif type(error) is RuntimeError and str(error).split(":", 1)[0] in (
+            elif (type(error) is RuntimeError or isinstance(error, ResearchTimeout)) and str(error).split(":", 1)[0] in (
                     "CONFIGURATION", "TRANSIENT", "PERMANENT"):
                 safe += str(error)[:300]
             else:

@@ -119,7 +119,8 @@ def render_clips(cfg, script, segments, assets, folder):
         scene["icon"] = creative.topic_icon(text) if cfg.motion_icons else None
         if cfg.motion_lottie:
             scene["animation_data"], credit = creative.select_animation(cfg, text, library)
-            credits.append(credit)
+            if credit:
+                credits.append(credit)
     if cfg.motion_icons:
         credits.append({"kind": "icon", "license": "ISC", "license_url": creative.LUCIDE_LICENSE,
                         "source_url": "https://lucide.dev", "attribution": "Lucide Contributors / Iconify (ISC)"})

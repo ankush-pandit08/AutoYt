@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     tts_voice: str = Field(default_factory=lambda data: "Puck" if data.get("tts_engine") == "gemini"
                            else "" if data.get("tts_engine") == "elevenlabs" else "am_michael")
     tts_speed: float = Field(default=1.0, ge=0.85, le=1.15)
+    tts_fallback_enabled: bool = True
     narration_language: Literal["en", "hi"] = "en"
     script_style: Literal["standard", "hinglish"] = "standard"
     kokoro_model: Path = Path("data/models/kokoro/kokoro-v1.0.int8.onnx")

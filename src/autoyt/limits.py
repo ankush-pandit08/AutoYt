@@ -8,6 +8,10 @@ _budget = ContextVar("research_budget", default=None)
 _request_limit = ContextVar("research_request_limit", default=None)
 
 
+class ResearchTimeout(RuntimeError):
+    """Safe, local deadline diagnostic; never contains a provider response."""
+
+
 def active():
     return _budget.get() is not None
 
@@ -15,7 +19,27 @@ def active():
 def check():
     budget = _budget.get()
     if budget and time.monotonic() >= budget["deadline"]:
-        raise RuntimeError("TRANSIENT: Research time limit reached; retry later or provide official source links")
+        raise ResearchTimeout("TRANSIENT: Research time limit reached; retry later or provide official source links")
+
+
+def remaining():
+    budget = _budget.get()
+    return max(0, budget["deadline"] - time.monotonic()) if budget else None
+
+
+@contextmanager
+def sub_budget(seconds):
+    """Reserve time for later work without extending the parent stage deadline."""
+    parent = _budget.get()
+    deadline = time.monotonic() + seconds
+    token = _budget.set({"deadline": min(deadline, parent["deadline"]) if parent else deadline,
+                         "notify": parent["notify"] if parent else None})
+    try:
+        check()
+        yield
+        check()
+    finally:
+        _budget.reset(token)
 
 
 def timeout(default):
