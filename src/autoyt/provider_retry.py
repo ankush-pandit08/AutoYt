@@ -40,8 +40,8 @@ def retry_after(response):
         return None
 
 
-def request(send, provider, rate_info):
-    # At most four HTTP attempts. Daily quotas never sleep or switch providers.
+def request(send, provider, rate_info, *, fail_fast=False):
+    # The LLM coordinator switches providers; direct calls retain bounded backoff.
     for attempt in range(4):
         limits.check()
         response = send()
@@ -55,9 +55,11 @@ def request(send, provider, rate_info):
                 pass
         if status == 429:
             kind, delay, permanent = rate_info(response)
-            if permanent:
+            if permanent or fail_fast:
                 return response
         elif status in (500, 502, 503, 504):
+            if fail_fast:
+                return response
             kind, delay = "service availability", retry_after(response)
         else:
             return response

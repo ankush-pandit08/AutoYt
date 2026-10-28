@@ -30,6 +30,7 @@ data = {
                  "morning_plan_time": "05:00", "uploads_enabled": True, "visibility": "public",
                  "language": "en", "script_style": "standard", "voice": "am_michael", "tts_engine": "kokoro",
                  "content_mode": "youtube_insights", "model": "fixture-groq-model", "topic_focus": "ai_coding",
+                 "script_fallback_enabled": True,
                  "public_images": True, "pixabay": False, "pexels": False, "token_present": True},
     "jobs": [{"id": "a"*16, "title": "A local preview", "state": "READY_TO_UPLOAD", "dry_run": 1, "stage": 7,
               "progress": 88, "created_at": stamp, "has_cover": False, "has_video": False},
@@ -58,6 +59,13 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def do_GET(self):
+        if self.path == '/api/jobs/' + 'a'*16:
+            return self.send(200, {**data['jobs'][0],
+                'script_settings': {'provider':'groq','model':'fixture-groq-model'},
+                'script_provider_usage': {'preferred_provider':'groq','active_provider':'gemini','calls':[
+                    {'provider':'groq','model':'fixture-groq-model','schema':'NaturalEditorialDraft',
+                     'status':'unavailable','reason':'rate_limited'},
+                    {'provider':'gemini','model':'fixture-gemini-model','schema':'NaturalEditorialDraft','status':'success'}]}})
         if self.path == "/api/status":
             return self.send(503, {"error": "Fixture offline"}) if controls["offline"] else self.send(200, data)
         if self.path == "/api/session":

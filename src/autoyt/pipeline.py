@@ -205,6 +205,7 @@ class Pipeline:
             return job_id
         folder = cfg.output_dir / job_id
         folder.mkdir(parents=True, exist_ok=True)
+        self.llm.usage_sink = lambda usage: self._save(job_id, folder, "script_provider_usage", usage)
         try:
             if shutil.disk_usage(folder).free < cfg.min_free_gb * 1024**3:
                 raise RuntimeError("CONFIGURATION: insufficient disk space")

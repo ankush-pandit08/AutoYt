@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     youtube_discovery_region: str = Field(default="IN", pattern=r"^[A-Z]{2}$")
     ollama_base_url: str = "http://127.0.0.1:11434"
     llm_provider: Literal["ollama", "groq", "gemini", "openrouter"] = "ollama"
+    script_fallback_enabled: bool = True
     openrouter_api_key: str = Field(default="", repr=False)
     openrouter_model: str = Field(default="google/gemma-4-31b-it:free", pattern=r"^[a-zA-Z0-9._/-]+:free$")
     gemini_api_key: str = Field(default="", repr=False)

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import httpx
 from pydantic import BaseModel, Field, ValidationError, create_model, model_validator
 
-from . import limits, narration_duration
+from . import limits, narration_duration, script_failover
 from .discovery import words
 from .groq_limits import TokenBudget, rate_error
 from .local_context import output_format
@@ -31,6 +31,22 @@ class LLM:
         self._used = False
         self._groq_budget = TokenBudget()
         self._openrouter = None
+        self._clients = {}
+        self._blocked_providers = {}
+        self._active_provider = cfg.llm_provider
+        self._usage = []
+        self.usage_sink = None
+
+    def _record_usage(self, provider, schema, status, reason=None):
+        event = {"provider": provider, "model": getattr(self.cfg, provider + "_model"),
+                 "schema": schema.__name__, "status": status}
+        if reason:
+            event["reason"] = reason
+        self._usage.append(event)
+        self._usage = self._usage[-200:]
+        if self.usage_sink:
+            self.usage_sink({"preferred_provider": self.cfg.llm_provider,
+                             "active_provider": self._active_provider, "calls": list(self._usage)})
 
     def embeddings(self, texts):
         self.cfg.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -53,6 +69,8 @@ class LLM:
                                + self.cfg.ollama_embedding_model) from None
 
     def release(self):
+        for client in self._clients.values():
+            client.release()
         if not self._used:
             return
         try:
@@ -60,10 +78,52 @@ class LLM:
                                   json={"model": self.cfg.ollama_model, "stream": False, "keep_alive": 0})
             response.raise_for_status()
             self._used = False
+        except httpx.ConnectError:
+            # An offline local runtime cannot retain a model in memory.
+            self._used = False
         except httpx.HTTPError:
             raise RuntimeError("TRANSIENT: could not release local model memory before media generation") from None
 
     def structured(self, schema, instruction, data):
+        if not self.cfg.script_fallback_enabled:
+            result = self._structured_single(schema, instruction, data)
+            self._record_usage(self.cfg.llm_provider, schema, "success")
+            return result
+        order = dict.fromkeys((self._active_provider, self.cfg.llm_provider, *script_failover.PROVIDERS))
+        for provider in order:
+            limits.check()  # Provider switching must never reset or bypass the research deadline.
+            if provider in self._blocked_providers:
+                continue
+            if (provider != "ollama" or provider != self.cfg.llm_provider) and not script_failover.available(self.cfg, provider):
+                self._blocked_providers[provider] = "not_configured_or_running"
+                self._record_usage(provider, schema, "skipped", "not_configured_or_running")
+                continue
+            client = self
+            if provider != self.cfg.llm_provider:
+                if provider not in self._clients:
+                    self._clients[provider] = LLM(self.cfg.model_copy(update={"llm_provider": provider}))
+                client = self._clients[provider]
+            try:
+                result = client._structured_single(schema, instruction, data)
+            except RuntimeError as error:
+                reason = script_failover.failure_reason(error)
+                if not reason:
+                    raise
+                self._blocked_providers[provider] = reason
+                self._record_usage(provider, schema, "unavailable", reason)
+                log.warning("Script provider %s unavailable (%s); trying the next configured provider", provider, reason)
+                limits.progress(f"{provider.title()} unavailable ({reason}); trying another script provider")
+                continue
+            if provider != self._active_provider:
+                log.info("Script failover: using %s / %s", provider, getattr(self.cfg, provider + "_model"))
+            self._active_provider = provider
+            self._record_usage(provider, schema, "success")
+            return result
+        reasons = "; ".join(f"{provider}: {reason}" for provider, reason in self._blocked_providers.items())
+        raise RuntimeError("TRANSIENT: All configured script providers are unavailable. " + reasons +
+                           ". Retry when a provider's quota or service recovers; saved work is retained.") from None
+
+    def _structured_single(self, schema, instruction, data):
         limits.progress("Model: " + schema.__name__)
         if self.cfg.llm_provider == "openrouter":
             from .openrouter_ai import OpenRouter
@@ -107,11 +167,14 @@ class LLM:
             except httpx.HTTPStatusError as error:
                 status = error.response.status_code
                 if status == 404:
+                    self._used = False
                     raise RuntimeError("CONFIGURATION: Ollama model missing; pull the configured model") from None
                 if status == 400 and "context" in error.response.text.lower():
+                    self._used = False
                     raise RuntimeError("CONFIGURATION: model prompt exceeds context; reduce repeated input "
                                        "or increase context only if RAM permits") from None
                 if status == 500 and "memory" in error.response.text.lower():
+                    self._used = False
                     raise RuntimeError("CONFIGURATION: insufficient RAM for Ollama; free memory or "
                                        "configure a smaller local model/context") from None
                 if status in (429, 500, 502, 503, 504) and attempt < 2:
@@ -119,12 +182,14 @@ class LLM:
                     continue
                 raise RuntimeError("TRANSIENT: Ollama request failed; check local runtime/model health") from None
             except httpx.TimeoutException:
-                if limits.active() or attempt == 2:
+                if self.cfg.script_fallback_enabled or limits.active() or attempt == 2:
                     raise RuntimeError("TRANSIENT: local Ollama generation timed out while processing "
                                        + schema.__name__ + "; CPU processing exceeded the allotted time") from None
                 limits.pause(2 ** attempt)
-            except httpx.TransportError:
-                if limits.active() or attempt == 2:
+            except httpx.TransportError as error:
+                if isinstance(error, httpx.ConnectError):
+                    self._used = False
+                if self.cfg.script_fallback_enabled or limits.active() or attempt == 2:
                     raise RuntimeError("TRANSIENT: local Ollama unavailable or generation timed out") from None
                 limits.pause(2 ** attempt)
         raise ValueError("VALIDATION: model exhausted three structured-output attempts")
@@ -163,7 +228,7 @@ class LLM:
                     daily = "perday" in detail or "daily" in detail
                     return "daily quota" if daily else "quota/rate limit", delay, daily or delay is None
 
-                response = provider_request(send, "Gemini", quota)
+                response = provider_request(send, "Gemini", quota, fail_fast=self.cfg.script_fallback_enabled)
                 limits.check()
                 response.raise_for_status()
                 candidate = response.json()["candidates"][0]
@@ -185,14 +250,16 @@ class LLM:
                 if status >= 500:
                     raise RuntimeError(f"TRANSIENT: Gemini service unavailable (HTTP {status}); retry later "
                                        "or select another script model") from None
+                if status == 404:
+                    raise RuntimeError("CONFIGURATION: Gemini selected model unavailable; check model access") from None
                 raise RuntimeError("CONFIGURATION: Gemini request rejected; check key, model access and schema") from None
             except httpx.TimeoutException:
-                if limits.active() or attempt == 2:
+                if self.cfg.script_fallback_enabled or limits.active() or attempt == 2:
                     raise RuntimeError("TRANSIENT: Gemini request timed out; the key may be valid but "
                                        "generation did not respond in time. Retry later or select another script model") from None
                 limits.pause(2 ** attempt)
             except httpx.TransportError:
-                if limits.active() or attempt == 2:
+                if self.cfg.script_fallback_enabled or limits.active() or attempt == 2:
                     raise RuntimeError("TRANSIENT: Cannot connect to Gemini; check network, proxy and service availability") from None
                 limits.pause(2 ** attempt)
         raise ValueError("VALIDATION: Gemini exhausted three structured-output attempts")
@@ -230,7 +297,7 @@ class LLM:
                     kind, delay, large = rate_error(response)
                     return kind, delay, large or "per day" in kind
 
-                response = provider_request(send, "Groq", quota)
+                response = provider_request(send, "Groq", quota, fail_fast=self.cfg.script_fallback_enabled)
                 limits.check()
                 response.raise_for_status()
                 choice = response.json()["choices"][0]
@@ -260,11 +327,13 @@ class LLM:
                     raise RuntimeError(f"TRANSIENT: Groq {kind} limit reached." + wait) from None
                 if status == 413:
                     raise RuntimeError("CONFIGURATION: Groq request exceeds the model's token capacity; reduce source context") from None
+                if status == 404:
+                    raise RuntimeError("CONFIGURATION: Groq selected model unavailable; check model access") from None
                 if status >= 500:
                     raise RuntimeError(f"TRANSIENT: Groq service unavailable (HTTP {status}); retry later") from None
                 raise RuntimeError("CONFIGURATION: Groq request rejected; check configured model and account limits") from None
             except httpx.TransportError:
-                if limits.active() or attempt == 2:
+                if self.cfg.script_fallback_enabled or limits.active() or attempt == 2:
                     raise RuntimeError("TRANSIENT: Groq unavailable or request timed out") from None
                 limits.pause(2 ** attempt)
         raise ValueError("VALIDATION: API model exhausted three structured-output attempts")

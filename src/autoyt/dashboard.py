@@ -287,6 +287,7 @@ class Dashboard:
                              "tts_engine": cfg.tts_engine,
                              "content_mode": cfg.content_mode,
                              "model": getattr(cfg, cfg.llm_provider + "_model"),
+                             "script_fallback_enabled": cfg.script_fallback_enabled,
                              "pixabay": bool(cfg.pixabay_api_key),
                              "public_images": cfg.enable_public_images,
                              "creator_reference_count": len(cfg.creator_channel_ids),
@@ -313,7 +314,7 @@ class Dashboard:
         if not JOB_ID.fullmatch(job_id):
             raise ValueError("Invalid job")
         result = self.store.get(job_id)
-        for kind in ("request", "render_settings", "render_report", "script_settings", "script", "research", "source_brief", "editorial", "content_package", "research_attempts", "media_assets", "media_license_audit", "validation", "youtube"):
+        for kind in ("request", "render_settings", "render_report", "script_settings", "script_provider_usage", "script", "research", "source_brief", "editorial", "content_package", "research_attempts", "media_assets", "media_license_audit", "validation", "youtube"):
             value = self.store.load(job_id, kind)
             if kind == "media_assets" and value:
                 value = [{k: v for k, v in asset.items() if k != "path"} for asset in value]

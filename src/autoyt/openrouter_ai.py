@@ -1,4 +1,4 @@
-"""Explicit, free-only OpenRouter scripts. No model or paid-route fallback."""
+"""Explicit, free-only OpenRouter scripts. Cross-provider failover is coordinated by LLM."""
 import json
 import logging
 import time
@@ -84,7 +84,7 @@ class OpenRouter:
                     message = quota_failure(response)
                     return "free-model request allowance", retry_after(response), "daily free-request allowance exhausted" in message
 
-                response = provider_request(send, "OpenRouter", quota)
+                response = provider_request(send, "OpenRouter", quota, fail_fast=self.cfg.script_fallback_enabled)
                 limits.check()
                 if response.status_code == 429:
                     delay = retry_after(response)
@@ -103,7 +103,7 @@ class OpenRouter:
                     raise ValueError("Incomplete generation")
                 return schema.model_validate_json(choice["message"]["content"])
             except httpx.TransportError:
-                raise RuntimeError("TRANSIENT: OpenRouter connection failed or timed out; no provider was switched") from None
+                raise RuntimeError("TRANSIENT: OpenRouter connection failed or timed out") from None
             except (ValueError, KeyError, IndexError, TypeError):
                 feedback = " Previous JSON was incomplete or invalid. Follow all required fields and schema constraints."
         raise ValueError("VALIDATION: OpenRouter exhausted two structured-output attempts")
