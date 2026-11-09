@@ -628,5 +628,41 @@
     "review_method": "Manual full-image review; no visible faces",
     "reviewed_at": "2026-10-28",
     "visual_kind": "real_photo"
+  },
+  {
+    "file": "pexels-weather-9851108.jpg",
+    "kind": "stock_image",
+    "provider": "Pexels",
+    "category": "weather",
+    "title": "Storm clouds above the sea",
+    "author": "Ihor Lypnytskyi",
+    "source_url": "https://www.pexels.com/photo/storm-clouds-above-sea-9851108/",
+    "media_url": "https://images.pexels.com/photos/9851108/pexels-photo-9851108.jpeg?cs=srgb&dl=pexels-ihor-lypnytskyi-117692765-9851108.jpg&fm=jpg",
+    "license": "Pexels License https://www.pexels.com/license/",
+    "license_url": "https://www.pexels.com/license/",
+    "attribution": "Photo by Ihor Lypnytskyi on Pexels: https://www.pexels.com/photo/storm-clouds-above-sea-9851108/",
+    "free_to_use": true,
+    "permitted_use": "Edited illustrative B-roll; stock ocean scene, not a WeatherNext demonstration",
+    "tags": [
+      "storm",
+      "waves",
+      "ocean",
+      "sea",
+      "coast",
+      "coastal",
+      "weather",
+      "clouds",
+      "seashore",
+      "water"
+    ],
+    "width": 2894,
+    "height": 3618,
+    "bytes": 2237605,
+    "sha256": "11890180a353c40c3149ae31b4ebeeb4fedd11b707ac85c6aff414c5b53f89da",
+    "face_free": true,
+    "review_status": "approved",
+    "review_method": "Manual full-image review; no visible faces",
+    "reviewed_at": "2026-11-03",
+    "visual_kind": "real_photo"
   }
 ]

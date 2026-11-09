@@ -378,9 +378,70 @@ def test_reconcile_excludes_cancelled_upload_entries():
 
 
 def test_empty_description_preserves_recovery_tag(script):
-    body = youtube.metadata(script, "job-123", [{"attribution": "Original graphics"}])
+    body = youtube.metadata(script, "job-123", [{"attribution": "Original graphics"}], include_description=False)
     assert body["snippet"]["description"] == ""
     assert "AutoYT-job-job-123" in body["snippet"]["tags"]
+
+
+def test_default_metadata_has_short_summary_hashtags_and_topic_keywords(script):
+    script.title = "OpenAI releases a new coding model"
+    script.topic = script.title
+    body = youtube.metadata(script, "job-123", [{"attribution": "Original graphics"}])
+    snippet = body["snippet"]
+    assert snippet["description"].startswith(script.description)
+    assert "#Shorts" in snippet["description"] and "#OpenAI" in snippet["description"]
+    assert "AutoYT job:" not in snippet["description"]
+    assert any("OpenAI" in tag for tag in snippet["tags"])
+    assert "AutoYT-job-job-123" in snippet["tags"]
+    assert all("#" not in tag for tag in snippet["tags"])
+
+
+def test_unicode_and_large_metadata_fit_youtube_limits(script):
+    script.description = "नई तकनीक और AI की जानकारी। Technology update. " * 50
+    script.topic = " ".join("technology" + str(i) for i in range(120))
+    script.hashtags = ["#AI", "#ai", "#Technology", "#Shorts"]
+    snippet = youtube.metadata(script, "job-123", [])["snippet"]
+    assert len(snippet["description"].split("\n\n")[0]) <= 320
+    assert len(snippet["description"].encode("utf-8")) <= 4900
+    assert len({t.casefold() for t in snippet["tags"]}) == len(snippet["tags"])
+    tags = snippet["tags"]
+    assert sum(len(t) + (2 if " " in t else 0) for t in tags) + len(tags)-1 <= 500
+    assert "robotics" not in [t.casefold() for t in tags]
+
+
+def test_pending_job_gets_description_without_changing_frozen_visibility(ready, script, monkeypatch):
+    cfg, store, job_id, folder = ready
+    cfg.youtube_privacy = "public"
+    store.save(job_id, "script", script.model_dump(mode="json"))
+    body = store.load(job_id, "metadata")
+    body["snippet"]["description"] = ""
+    store.save(job_id, "metadata", body)
+    fake = FakeYouTube(UploadRequest(), privacy="private")
+    install_fake(monkeypatch, fake)
+    youtube.upload(cfg, store, job_id, folder)
+    sent = fake.inserts[0]["body"]
+    assert sent["snippet"]["description"] and "#Shorts" in sent["snippet"]["description"]
+    assert sent["status"]["privacyStatus"] == "private"
+    assert json.loads((folder / "metadata.json").read_text())["snippet"] == sent["snippet"]
+
+
+def test_resumed_upload_keeps_original_metadata(ready, script, monkeypatch):
+    cfg, store, job_id, folder = ready
+    store.save(job_id, "script", script.model_dump(mode="json"))
+    body = store.load(job_id, "metadata")
+    body["snippet"]["description"] = ""
+    body["snippet"]["tags"] = [f"AutoYT-job-{job_id}"]
+    store.save(job_id, "metadata", body)
+    store.upload_progress(job_id, "SESSION", "https://upload.example/saved", 12)
+    class Resume(UploadRequest):
+        def next_chunk(self, num_retries):
+            self.uri_at_resume = self.resumable_uri
+            return super().next_chunk(num_retries)
+    fake = FakeYouTube(Resume())
+    install_fake(monkeypatch, fake)
+    youtube.upload(cfg, store, job_id, folder)
+    assert fake.inserts[0]["body"]["snippet"] == body["snippet"]
+    assert fake.request.uri_at_resume == "https://upload.example/saved"
 
 
 def test_reconcile_empty_description_by_tag():

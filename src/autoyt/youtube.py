@@ -144,21 +144,72 @@ def service(cfg, interactive=False):
     return youtube, channel
 
 
-def metadata(script, job_id, assets, privacy="private", include_description=False):
+def discovery_metadata(script, job_id):
+    """Reuse the grounded script; no extra model request or unrelated trending terms."""
+    import re
+
+    content = set(re.findall(r"\w+", (script.title + " " + script.topic + " " + script.script).casefold()))
+    hashtags = []
+    candidates = list(script.hashtags)
+    for word in ("OpenAI", "Gemini", "Claude", "Copilot", "GitHub", "Python", "Robotics", "LLM"):
+        if word.casefold() in content:
+            candidates.insert(0, "#" + word)
+    for value in [h for h in candidates if h.casefold() not in {"#shorts", "#technology"}] + ["#Technology", "#Shorts"]:
+        if (re.fullmatch(r"#[\w]+", value) and len(value) <= 40
+                and value.casefold() not in {h.casefold() for h in hashtags}):
+            hashtags.append(value)
+    hashtags = hashtags[:4] + (["#Shorts"] if "#Shorts" not in hashtags[:4] else [])
+    stop = {"a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "in", "is", "it",
+            "its", "of", "on", "or", "that", "the", "their", "this", "to", "with", "your"}
+    phrases = []
+    for text in (script.title, script.topic):
+        tokens = [t for t in re.findall(r"[\w.+-]+", text) if t.casefold() not in stop and len(t) <= 40]
+        phrase = " ".join(tokens)
+        phrases.append(phrase if len(phrase) <= 80 else phrase[:80].rsplit(" ", 1)[0])
+    if "ai" in content:
+        phrases.append("artificial intelligence")
+    if content & {"llm", "llms"}:
+        phrases.append("large language models")
+    if content & {"coding", "programming"}:
+        phrases.extend(["coding", "programming"])
+    phrases.extend(h[1:] for h in hashtags)
+    # YouTube counts commas and implicit quotation marks around multiword tags.
+    tags = [f"AutoYT-job-{job_id}"]
+    for value in phrases:
+        if (not value or len(value) > 80 or value.casefold() in {t.casefold() for t in tags}
+                or len(tags) >= 13):
+            continue
+        proposed = tags + [value]
+        size = sum(len(t) + (2 if " " in t else 0) for t in proposed) + len(proposed) - 1
+        if size <= 500:
+            tags.append(value)
+    return hashtags, tags
+
+
+def metadata(script, job_id, assets, privacy="private", include_description=True):
     if privacy not in ("private", "public"):
         raise ValueError("Unsupported upload visibility")
     language = "hi" if any("\u0900" <= c <= "\u097f" for c in script.script) else "en"
-    description = script.description + "\n\n" + " ".join(script.hashtags)
-    description += "\n\nSources:\n" + "\n".join(script.source_urls)
+    import re
+
+    hashtags, tags = discovery_metadata(script, job_id)
+    summary = " ".join(re.sub(r"#[\w]+", "", script.description).replace("<", "").replace(">", "").split())
+    if len(summary) > 320:
+        summary = summary[:317].rsplit(" ", 1)[0].rstrip(".,;:") + "..."
+    description = summary + "\n\n" + " ".join(hashtags)
+    sources = list(dict.fromkeys(u for u in script.source_urls
+        if u.startswith("https://") and len(u.encode("utf-8")) <= 400))[:2]
+    if sources:
+        description += "\n\nSources:\n" + "\n".join(sources)
     credits = set()
     for asset in assets:
-        credit = asset["attribution"]
         if asset.get("license") == "CC-BY-4.0":
+            credit = asset["attribution"]
             credit += " | " + asset["license_url"] + " | Edited/cropped for this video"
             credit += " | " + asset["source_url"]
-        credits.add(credit)
-    description += "\n\nVisuals are illustrative.\n" + "\n".join(sorted(credits))
-    description += f"\n\nAutoYT job: {job_id}"
+            credits.add(credit)
+    if credits:
+        description += "\n\nVisual credits:\n" + "\n".join(sorted(credits))
     if not include_description:
         description = ""
     if len(description) > 4900 or len(description.encode("utf-8")) > 4900:
@@ -166,7 +217,7 @@ def metadata(script, job_id, assets, privacy="private", include_description=Fals
     if any(c in script.title for c in "<>"):
         raise ValueError("Invalid YouTube title characters")
     return {"snippet": {"title": script.title, "description": description,
-                        "tags": [h.lstrip("#") for h in script.hashtags] + [f"AutoYT-job-{job_id}"], "categoryId": "28",
+                        "tags": tags, "categoryId": "28",
                         "defaultLanguage": language, "defaultAudioLanguage": language},
             "status": {"privacyStatus": privacy,
                        "containsSyntheticMedia": script.needs_synthetic_media_disclosure}}
@@ -301,6 +352,16 @@ def upload(cfg, store, job_id, folder):
     from .licensing import audit
     assets = store.load(job_id, "media_assets")
     license_audit = audit(assets)
+    # Upgrade pending jobs only before a new upload starts. Resumed/uncertain
+    # sessions keep the exact metadata originally sent to YouTube.
+    saved_script = store.load(job_id, "script")
+    if saved_script and (not attempt or (attempt["state"] == "REJECTED" and not attempt["session_uri"])):
+        from .models import Script
+        body = store.load(job_id, "metadata")
+        updated = metadata(Script.model_validate(saved_script), job_id, assets, body["status"]["privacyStatus"])
+        body["snippet"].update(description=updated["snippet"]["description"], tags=updated["snippet"]["tags"])
+        write_json(folder / "metadata.json", body)
+        store.save(job_id, "metadata", body)
     description = store.load(job_id, "metadata")["snippet"]["description"]
     for asset in assets:
         if asset.get("license") == "CC-BY-4.0" and any(
