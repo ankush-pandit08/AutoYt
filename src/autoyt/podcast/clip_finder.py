@@ -195,7 +195,16 @@ class ClipFinder:
                         punctuated_candidates.append(list(current_window))
                 elif dur > self.max_duration:
                     break
-        return punctuated_candidates if punctuated_candidates else any_candidates
+        if punctuated_candidates:
+            return punctuated_candidates
+        if any_candidates:
+            return any_candidates
+        # Fallback: if video is shorter than min_duration (e.g. 15-39s), allow the full valid speech range as a candidate
+        if segments:
+            total_dur = segments[-1].end - segments[0].start
+            if total_dur >= 15.0:
+                return [list(segments)]
+        return []
 
     def _score_heuristic(self, window: List[TranscriptSegment]) -> tuple[float, dict]:
         """Compute candidate quality score (0–100) using speech features and keyword metrics."""

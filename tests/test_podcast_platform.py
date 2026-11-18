@@ -50,6 +50,39 @@ class TestSourceRegistry:
         reg2 = SourceRegistry(json_file)
         assert reg2.get("raj_shamani").enabled is False
 
+    def test_add_and_remove_source(self, tmp_path):
+        json_file = tmp_path / "podcast_sources.json"
+        reg = SourceRegistry(json_file)
+        new_src = PodcastSource(
+            id="test_creator",
+            name="Test Creator",
+            show_name="Test Show",
+            youtube_channel_id="UC1234567890",
+            youtube_channel_url="https://youtube.com/@test",
+            playlist_id=None,
+            rss_feed_url=None,
+            website_url=None,
+            enabled=True,
+            priority_topics=["tech", "ai"],
+            created_at=datetime.now(timezone.utc),
+        )
+        reg.add(new_src)
+        assert reg.get("test_creator") is not None
+        assert reg.get("test_creator").name == "Test Creator"
+
+        # Persistence check
+        reg2 = SourceRegistry(json_file)
+        assert reg2.get("test_creator") is not None
+
+        # Remove
+        removed = reg2.remove("test_creator")
+        assert removed is True
+        assert reg2.get("test_creator") is None
+
+        # Verify removal persisted
+        reg3 = SourceRegistry(json_file)
+        assert reg3.get("test_creator") is None
+
 
 class TestRightsChecker:
     def test_hard_gate_blocks_by_default(self, temp_store):
@@ -670,6 +703,63 @@ class TestPodcastScheduler:
         assert "podcast_publish_slot_2030" in job_ids
         assert "podcast_publish_slot_2100" in job_ids
         assert len(job_ids) == 8
+
+
+class TestDashboardPodcastActions:
+    def test_dashboard_podcast_toggle_add_remove_source(self, cfg):
+        from autoyt.dashboard import Dashboard
+
+        app = Dashboard(cfg)
+        try:
+            # 1. Snapshot sources
+            snap = app.podcast_snapshot()
+            assert "sources" in snap
+            initial_count = len(snap["sources"])
+
+            # 2. Add source
+            res_add = app.podcast_action("podcast_add_source", {
+                "name": "New Test Creator",
+                "show_name": "Test Show",
+                "channel_url": "https://www.youtube.com/@NewTestCreator",
+            })
+            assert "added creator" in res_add["message"].lower()
+            slug = res_add["source"]["id"]
+
+            # Snapshot reflects new source immediately
+            snap2 = app.podcast_snapshot()
+            assert len(snap2["sources"]) == initial_count + 1
+            src_record = next(s for s in snap2["sources"] if s["id"] == slug)
+            assert src_record["enabled"] is True
+
+            # 3. Toggle source (disable)
+            res_toggle = app.podcast_action("podcast_toggle_source", {"source_id": slug})
+            assert res_toggle["enabled"] is False
+
+            # Snapshot reflects disabled source immediately
+            snap3 = app.podcast_snapshot()
+            src_record3 = next(s for s in snap3["sources"] if s["id"] == slug)
+            assert src_record3["enabled"] is False
+
+            # 4. Toggle back (enable)
+            res_toggle2 = app.podcast_action("podcast_toggle_source", {"source_id": slug})
+            assert res_toggle2["enabled"] is True
+
+            # Snapshot reflects enabled source immediately
+            snap4 = app.podcast_snapshot()
+            src_record4 = next(s for s in snap4["sources"] if s["id"] == slug)
+            assert src_record4["enabled"] is True
+
+            # 5. Remove source
+            res_rem = app.podcast_action("podcast_remove_source", {"source_id": slug})
+            assert "removed" in res_rem["message"].lower()
+
+            # Snapshot reflects deletion immediately
+            snap5 = app.podcast_snapshot()
+            assert len(snap5["sources"]) == initial_count
+            assert not any(s["id"] == slug for s in snap5["sources"])
+        finally:
+            app.close()
+
 
 
 

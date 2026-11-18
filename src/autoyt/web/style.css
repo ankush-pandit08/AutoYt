@@ -1228,6 +1228,56 @@ input:focus, select:focus, textarea:focus {
   min-width: 96px;
 }
 
+/* ADD CREATOR FORM */
+.add-source-form {
+  margin-bottom: 20px;
+  padding: 18px 20px;
+  background: #111622;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  display: block;
+}
+
+.add-source-form[hidden] {
+  display: none !important;
+}
+
+.add-source-form h4 {
+  margin: 0 0 14px 0;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.add-source-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.add-source-form label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.add-source-form input.form-input {
+  width: 100%;
+}
+
+.add-source-url-group {
+  margin-bottom: 16px;
+}
+
+.add-source-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 /* SOURCES LIST */
 .sources-list {
   display: flex;
@@ -1244,23 +1294,93 @@ input:focus, select:focus, textarea:focus {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   transition: var(--transition);
+  gap: 16px;
+}
+
+.source-item.source-disabled {
+  opacity: 0.72;
 }
 
 .source-item:hover {
   border-color: #333d52;
   background: #1a202e;
+  opacity: 1;
 }
 
-.source-info h4 {
+.source-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.source-header-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.source-name {
   font-size: 15px;
   font-weight: 700;
   color: #fff;
+  margin: 0;
 }
 
-.source-info p {
+.source-show-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #a5b4fc;
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+
+.source-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 5px;
   font-size: 12.5px;
+  flex-wrap: wrap;
+}
+
+.source-yt-link {
+  color: #60a5fa;
+  text-decoration: none;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.source-yt-link:hover {
+  text-decoration: underline;
+  color: #93c5fd;
+}
+
+.source-last-ep {
   color: var(--text-dim);
-  margin-top: 2px;
+  font-size: 11.5px;
+}
+
+.source-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btn-danger-outline {
+  background: transparent;
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.btn-danger-outline:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: #ef4444;
+  color: #fca5a5;
 }
 
 /* YOUTUBE STATUS */

@@ -177,11 +177,11 @@ class SourceRegistry:
                 for raw in data.get("sources", []):
                     src = PodcastSource.from_dict(raw)
                     self._sources[src.id] = src  # Override or add
-                log.info("Loaded %d podcast sources from %s", len(data.get("sources", [])), self._file)
+                log.debug("Loaded %d podcast sources from %s", len(data.get("sources", [])), self._file)
             except (json.JSONDecodeError, TypeError, KeyError) as exc:
                 log.warning("Could not parse podcast sources file %s: %s", self._file, exc)
         else:
-            log.info("No podcast_sources.json found at %s; using built-in defaults", self._file)
+            log.debug("No podcast_sources.json found at %s; using built-in defaults", self._file)
             # Write the defaults so the user can edit them
             self._save()
 

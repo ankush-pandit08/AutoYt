@@ -307,8 +307,34 @@
                 <h3>Configured Podcast Creators</h3>
                 <p>Supported creators monitored by the automatic discovery engine.</p>
               </div>
+              <button id="btnToggleAddSource" class="btn btn-primary btn-sm" type="button">
+                <span>➕</span> Add Creator
+              </button>
             </div>
             <div class="card-body">
+              <!-- Add Creator Form -->
+              <form id="addSourceForm" class="add-source-form" hidden>
+                <h4>Add New Podcast Creator or Channel</h4>
+                <div class="add-source-grid">
+                  <div>
+                    <label for="newSourceName">Creator / Channel Name *</label>
+                    <input type="text" id="newSourceName" class="form-input" placeholder="e.g. Shubhankar Mishra" aria-label="Creator or Channel Name" required />
+                  </div>
+                  <div>
+                    <label for="newSourceShow">Show / Podcast Title</label>
+                    <input type="text" id="newSourceShow" class="form-input" placeholder="e.g. The Untold Show (Optional)" aria-label="Show or Podcast Title" />
+                  </div>
+                </div>
+                <div class="add-source-url-group">
+                  <label for="newSourceUrl">YouTube Channel URL or @Handle *</label>
+                  <input type="text" id="newSourceUrl" class="form-input" placeholder="e.g. https://www.youtube.com/@ShubhankarMishraOfficial" aria-label="YouTube Channel URL or Handle" required />
+                </div>
+                <div class="add-source-actions">
+                  <button type="button" id="btnCancelAddSource" class="btn btn-secondary btn-sm">Cancel</button>
+                  <button type="submit" id="btnSubmitAddSource" class="btn btn-primary btn-sm">Save Creator</button>
+                </div>
+              </form>
+
               <div id="sourcesList" class="sources-list">
                 <!-- Dynamic Sources List -->
               </div>

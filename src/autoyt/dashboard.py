@@ -7,6 +7,7 @@ import re
 import secrets
 import shutil
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -56,14 +57,12 @@ class Dashboard:
         self.scheduler_owned = False
         from .youtube_oauth import YouTubeOAuth
         self.youtube_auth = YouTubeOAuth(cfg)
-        self._podcast_registry = None
 
     def podcast_snapshot(self):
         try:
-            if self._podcast_registry is None:
-                from .podcast.sources import SourceRegistry
-                self._podcast_registry = SourceRegistry()
-            sources = self._podcast_registry.all()
+            from .podcast.sources import SourceRegistry
+            registry = SourceRegistry()
+            sources = registry.all()
             episodes = self.store.list_podcast_episodes(limit=50)
             clips = self.store.list_podcast_clips(limit=100)
 
@@ -215,16 +214,101 @@ class Dashboard:
             return {"message": f"Clip {clip_id} uploaded to YouTube ({privacy})!", "result": res}
 
         if action == "podcast_toggle_source":
-            source_id = data["source_id"]
+            source_id = data.get("source_id")
+            if not source_id:
+                raise ValueError("source_id is required")
             registry = SourceRegistry()
             src = registry.get(source_id)
             if not src:
                 raise ValueError(f"Source {source_id} not found")
+            new_state = not src.enabled
             if src.enabled:
                 registry.disable(source_id)
             else:
                 registry.enable(source_id)
-            return {"message": f"Source {source_id} toggled.", "enabled": not src.enabled}
+            return {
+                "message": f"Source '{src.name}' is now {'enabled' if new_state else 'disabled'}.",
+                "enabled": new_state,
+                "source_id": source_id,
+            }
+
+        if action == "podcast_add_source":
+            name = (data.get("name") or "").strip()
+            show_name = (data.get("show_name") or name).strip()
+            channel_url = (data.get("channel_url") or "").strip()
+            channel_id = (data.get("channel_id") or "").strip()
+
+            if not name:
+                raise ValueError("Creator or channel name is required.")
+            if not channel_url:
+                raise ValueError("YouTube Channel URL or handle is required.")
+
+            import re
+            import secrets
+            slug = re.sub(r"[^a-z0-9_]+", "_", name.lower()).strip("_")
+            if not slug:
+                slug = f"source_{int(time.time())}"
+
+            registry = SourceRegistry()
+            if registry.get(slug):
+                slug = f"{slug}_{secrets.token_hex(2)}"
+
+            if not channel_id:
+                if "/channel/" in channel_url:
+                    channel_id = channel_url.split("/channel/")[1].split("/")[0].split("?")[0]
+                elif channel_url.startswith("UC"):
+                    channel_id = channel_url
+                else:
+                    channel_id = f"UC_{slug}"
+
+            from .podcast.sources import PodcastSource
+            new_source = PodcastSource(
+                id=slug,
+                name=name,
+                show_name=show_name,
+                youtube_channel_id=channel_id,
+                youtube_channel_url=channel_url,
+                playlist_id=None,
+                rss_feed_url=None,
+                website_url=None,
+                enabled=True,
+                priority_topics=[
+                    "motivation", "entrepreneurship", "startup", "success",
+                    "mindset", "business", "money", "career", "philosophy"
+                ],
+                created_at=datetime.now(timezone.utc),
+            )
+            registry.add(new_source)
+            return {"message": f"Added creator '{name}' successfully!", "source": new_source.to_dict()}
+
+        if action in {"podcast_remove_source", "podcast_delete_source"}:
+            source_id = data.get("source_id")
+            if not source_id:
+                raise ValueError("source_id is required.")
+            registry = SourceRegistry()
+            success = registry.remove(source_id)
+            if not success:
+                raise ValueError(f"Source {source_id} not found.")
+            return {"message": f"Source '{source_id}' removed.", "source_id": source_id}
+
+        if action == "podcast_scan_source":
+            source_id = data.get("source_id")
+            registry = SourceRegistry()
+            src = registry.get(source_id)
+            if not src:
+                raise ValueError(f"Source {source_id} not found.")
+            discovery = EpisodeDiscovery(self.cfg, self.store)
+            episodes = discovery.discover_episodes(src)
+            saved = 0
+            for ep in episodes:
+                existing = self.store.get_podcast_episode(ep.id)
+                if existing is None:
+                    self.store.save_podcast_episode({
+                        **ep.to_dict(),
+                        "status": "discovered",
+                    })
+                    saved += 1
+            return {"message": f"Scan finished for {src.name}: {len(episodes)} episodes found ({saved} new saved)."}
 
         if action == "podcast_manual_clip":
             url = data.get("url", "").strip()

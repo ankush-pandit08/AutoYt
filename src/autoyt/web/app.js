@@ -252,22 +252,39 @@ function renderEpisodesTable(episodes) {
 // Render Creators List
 function renderSources(sources) {
   const container = $('sourcesList');
-  if (!sources.length) {
-    container.innerHTML = `<p class="table-loading">No podcast sources configured.</p>`;
+  if (!sources || !sources.length) {
+    container.innerHTML = `<p class="table-loading">No podcast sources configured. Click "➕ Add Creator" above to add one.</p>`;
     return;
   }
 
   container.innerHTML = sources.map(src => {
     const isEnabled = src.enabled !== false;
     return `
-      <div class="source-item">
+      <div class="source-item ${isEnabled ? 'source-active' : 'source-disabled'}" data-id="${esc(src.id)}">
         <div class="source-info">
-          <h4>${esc(src.name)} (${esc(src.show_name)})</h4>
-          <p>${esc(src.youtube_channel_url || 'YouTube Channel')}</p>
+          <div class="source-header-row">
+            <h4 class="source-name">${esc(src.name)}</h4>
+            <span class="source-show-badge">${esc(src.show_name || 'Podcast')}</span>
+            <span class="badge ${isEnabled ? 'badge-success' : 'badge-candidate'}">${isEnabled ? 'Active' : 'Disabled'}</span>
+          </div>
+          <div class="source-meta">
+            <a href="${esc(src.youtube_channel_url || '#')}" target="_blank" rel="noopener noreferrer" class="source-yt-link">
+              ${esc(src.youtube_channel_url || 'YouTube Channel')} ↗
+            </a>
+            ${src.latest_episode ? `<span class="source-last-ep">Latest: ${esc(src.latest_episode.title?.slice(0, 42))}…</span>` : ''}
+          </div>
         </div>
-        <button class="btn ${isEnabled ? 'btn-secondary' : 'btn-primary'} btn-sm toggle-source-btn" data-id="${esc(src.id)}">
-          ${isEnabled ? 'Enabled ✓' : 'Disabled'}
-        </button>
+        <div class="source-actions">
+          <button class="btn btn-secondary btn-sm scan-source-btn" data-id="${esc(src.id)}" data-name="${esc(src.name)}" title="Scan this channel now for new episodes">
+            <span>🔍</span> Scan
+          </button>
+          <button class="btn ${isEnabled ? 'btn-secondary' : 'btn-primary'} btn-sm toggle-source-btn" data-id="${esc(src.id)}" data-name="${esc(src.name)}" title="${isEnabled ? 'Disable automatic discovery' : 'Enable automatic discovery'}">
+            ${isEnabled ? '✓ Enabled' : '✕ Disabled'}
+          </button>
+          <button class="btn btn-danger-outline btn-sm delete-source-btn" data-id="${esc(src.id)}" data-name="${esc(src.name)}" title="Remove creator from registry">
+            <span>🗑️</span>
+          </button>
+        </div>
       </div>
     `;
   }).join('');
@@ -327,33 +344,44 @@ function renderAutomationSchedule(schedule) {
 }
 
 // NAVIGATION TABS
+const tabTitles = {
+  clipsStudio: ['Channel overview & Clips Studio', 'Review AI-extracted 9:16 vertical Shorts and publish to YouTube in private mode'],
+  automationSchedule: ['Daily Shorts Automation & Schedule', 'Automated background publisher running 5 Shorts every evening between 7:00 PM and 9:00 PM IST'],
+  manualCreator: ['Create Shorts Clip', 'Paste any podcast or video URL to automatically extract vertical Shorts with animated captions'],
+  episodesFeed: ['Discovered Episodes Feed', 'Podcast episodes discovered from your creators, ranked by topic relevance'],
+  sourcesSettings: ['Creators & Channel Settings', 'Configure podcast source channels and YouTube publishing settings']
+};
+
+function switchTab(tab) {
+  if (!tabTitles[tab]) tab = 'clipsStudio';
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.tab === tab);
+  });
+
+  $('clipsStudioSection').hidden = tab !== 'clipsStudio';
+  $('manualCreatorSection').hidden = tab !== 'manualCreator' && tab !== 'clipsStudio';
+  $('episodesFeedSection').hidden = tab !== 'episodesFeed';
+  $('sourcesSettingsSection').hidden = tab !== 'sourcesSettings';
+  $('automationScheduleSection').hidden = tab !== 'automationSchedule';
+
+  $('pageTitle').textContent = tabTitles[tab][0];
+  $('pageSubtitle').textContent = tabTitles[tab][1];
+
+  if (window.location.hash !== `#${tab}`) {
+    history.replaceState(null, '', `#${tab}`);
+  }
+}
+
 document.querySelectorAll('.nav-item').forEach(item => {
   item.onclick = e => {
     e.preventDefault();
-    const tab = item.dataset.tab;
-    document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-    item.classList.add('active');
-
-    // Hide all sections
-    $('clipsStudioSection').hidden = tab !== 'clipsStudio';
-    $('manualCreatorSection').hidden = tab !== 'manualCreator' && tab !== 'clipsStudio';
-    $('episodesFeedSection').hidden = tab !== 'episodesFeed';
-    $('sourcesSettingsSection').hidden = tab !== 'sourcesSettings';
-    $('automationScheduleSection').hidden = tab !== 'automationSchedule';
-
-    const titles = {
-      clipsStudio: ['Channel overview & Clips Studio', 'Review AI-extracted 9:16 vertical Shorts and publish to YouTube in private mode'],
-      automationSchedule: ['Daily Shorts Automation & Schedule', 'Automated background publisher running 5 Shorts every evening between 7:00 PM and 9:00 PM IST'],
-      manualCreator: ['Create Shorts Clip', 'Paste any podcast or video URL to automatically extract vertical Shorts with animated captions'],
-      episodesFeed: ['Discovered Episodes Feed', 'Podcast episodes discovered from your creators, ranked by topic relevance'],
-      sourcesSettings: ['Creators & Channel Settings', 'Configure podcast source channels and YouTube publishing settings']
-    };
-
-    if (titles[tab]) {
-      $('pageTitle').textContent = titles[tab][0];
-      $('pageSubtitle').textContent = titles[tab][1];
-    }
+    switchTab(item.dataset.tab);
   };
+});
+
+window.addEventListener('hashchange', () => {
+  const hash = window.location.hash.replace('#', '');
+  if (hash && tabTitles[hash]) switchTab(hash);
 });
 
 // CLIPS FILTER PILLS
@@ -543,14 +571,60 @@ document.addEventListener('click', async e => {
   }
 
   // 7. Toggle Creator Source
-  if (e.target.matches('.toggle-source-btn')) {
-    const srcId = e.target.dataset.id;
+  const toggleBtn = e.target.closest('.toggle-source-btn');
+  if (toggleBtn) {
+    const srcId = toggleBtn.dataset.id;
+    const srcName = toggleBtn.dataset.name || srcId;
+    toggleBtn.disabled = true;
+    toggleBtn.textContent = 'Updating...';
     try {
       const res = await post({ action: 'podcast_toggle_source', source_id: srcId });
       toast(res.message || 'Source updated.', 'success');
       await refresh();
     } catch (err) {
       toast(err.message, 'error');
+      toggleBtn.disabled = false;
+      toggleBtn.textContent = 'Retry';
+    }
+    return;
+  }
+
+  // 7b. Delete Creator Source
+  const delSourceBtn = e.target.closest('.delete-source-btn');
+  if (delSourceBtn) {
+    const srcId = delSourceBtn.dataset.id;
+    const srcName = delSourceBtn.dataset.name || srcId;
+    if (!confirm(`Are you sure you want to remove creator "${srcName}" from your sources?`)) return;
+    delSourceBtn.disabled = true;
+    try {
+      toast(`Removing creator ${srcName}...`, 'info');
+      const res = await post({ action: 'podcast_remove_source', source_id: srcId });
+      toast(res.message || 'Creator removed.', 'success');
+      await refresh();
+    } catch (err) {
+      toast(err.message, 'error');
+      delSourceBtn.disabled = false;
+    }
+    return;
+  }
+
+  // 7c. Scan Creator Channel
+  const scanSourceBtn = e.target.closest('.scan-source-btn');
+  if (scanSourceBtn) {
+    const srcId = scanSourceBtn.dataset.id;
+    const srcName = scanSourceBtn.dataset.name || srcId;
+    scanSourceBtn.disabled = true;
+    scanSourceBtn.innerHTML = '<span>⏳</span> Scanning...';
+    try {
+      toast(`Scanning ${srcName} for latest episodes...`, 'info');
+      const res = await post({ action: 'podcast_scan_source', source_id: srcId });
+      toast(res.message || 'Scan completed!', 'success');
+      await refresh();
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      scanSourceBtn.disabled = false;
+      scanSourceBtn.innerHTML = '<span>🔍</span> Scan';
     }
     return;
   }
@@ -703,26 +777,94 @@ $('blockEpBtn').onclick = async () => {
   }
 };
 
-// YOUTUBE RECONNECT
-$('ytReconnectBtn').onclick = async () => {
-  try {
-    toast('Generating Google OAuth link...', 'info');
-    const res = await post({ action: 'youtube_reconnect' });
-    const authUrl = res.authorization_url || res.auth_url;
-    if (authUrl) {
-      const continueLink = $('ytAuthContinueLink');
-      continueLink.href = authUrl;
-      continueLink.hidden = false;
-      continueLink.style.display = 'inline-flex';
-      window.open(authUrl, '_blank');
-      toast('Opening Google sign-in. Click "Complete in Google ↗" if popup was blocked.', 'info');
-    } else {
-      toast(res.message || 'Reconnect request generated.', 'info');
+// ADD CREATOR FORM CONTROLS
+const btnToggleAddSource = $('btnToggleAddSource');
+const addSourceForm = $('addSourceForm');
+const btnCancelAddSource = $('btnCancelAddSource');
+
+if (btnToggleAddSource && addSourceForm) {
+  btnToggleAddSource.onclick = () => {
+    addSourceForm.hidden = !addSourceForm.hidden;
+    if (!addSourceForm.hidden && $('newSourceName')) $('newSourceName').focus();
+  };
+}
+
+if (btnCancelAddSource && addSourceForm) {
+  btnCancelAddSource.onclick = () => {
+    addSourceForm.reset();
+    addSourceForm.hidden = true;
+  };
+}
+
+if (addSourceForm) {
+  addSourceForm.onsubmit = async e => {
+    e.preventDefault();
+    const name = ($('newSourceName')?.value || '').trim();
+    const show_name = ($('newSourceShow')?.value || '').trim() || name;
+    const channel_url = ($('newSourceUrl')?.value || '').trim();
+
+    if (!name || !channel_url) {
+      toast('Creator name and YouTube channel URL are required.', 'error');
+      return;
     }
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-};
+
+    const submitBtn = $('btnSubmitAddSource');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Adding...';
+    }
+
+    try {
+      toast(`Adding creator "${name}"...`, 'info');
+      const res = await post({
+        action: 'podcast_add_source',
+        name,
+        show_name,
+        channel_url,
+      });
+      toast(res.message || `Creator '${name}' added successfully!`, 'success');
+      addSourceForm.reset();
+      addSourceForm.hidden = true;
+      await refresh();
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Save Creator';
+      }
+    }
+  };
+}
+
+// YOUTUBE RECONNECT
+const ytReconnectBtn = $('ytReconnectBtn');
+if (ytReconnectBtn) {
+  ytReconnectBtn.onclick = async () => {
+    ytReconnectBtn.disabled = true;
+    ytReconnectBtn.textContent = 'Connecting...';
+    try {
+      toast('Generating Google OAuth link...', 'info');
+      const res = await post({ action: 'youtube_reconnect' });
+      const authUrl = res.authorization_url || res.auth_url;
+      if (authUrl) {
+        const continueLink = $('ytAuthContinueLink');
+        continueLink.href = authUrl;
+        continueLink.hidden = false;
+        continueLink.style.display = 'inline-flex';
+        window.open(authUrl, '_blank');
+        toast('Opening Google sign-in. Click "Complete in Google ↗" if popup was blocked.', 'info');
+      } else {
+        toast(res.message || 'Reconnect request generated.', 'info');
+      }
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      ytReconnectBtn.disabled = false;
+      ytReconnectBtn.textContent = 'Reconnect Channel';
+    }
+  };
+}
 
 // AUTOMATION & SCHEDULE ACTIONS
 $('btnViewScheduleTab').onclick = () => {
@@ -767,5 +909,9 @@ $('btnRefreshSchedule').onclick = async () => {
 };
 
 // INITIALIZATION & PERIODIC REFRESH
+if (window.location.hash) {
+  const initHash = window.location.hash.replace('#', '');
+  if (tabTitles[initHash]) switchTab(initHash);
+}
 refresh();
 setInterval(refresh, 6000);
