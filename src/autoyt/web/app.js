@@ -706,11 +706,18 @@ $('blockEpBtn').onclick = async () => {
 // YOUTUBE RECONNECT
 $('ytReconnectBtn').onclick = async () => {
   try {
+    toast('Generating Google OAuth link...', 'info');
     const res = await post({ action: 'youtube_reconnect' });
-    if (res.auth_url) {
-      $('ytAuthContinueLink').href = res.auth_url;
-      $('ytAuthContinueLink').hidden = false;
-      toast('Click "Complete in Google" to sign in and grant upload permission.', 'info');
+    const authUrl = res.authorization_url || res.auth_url;
+    if (authUrl) {
+      const continueLink = $('ytAuthContinueLink');
+      continueLink.href = authUrl;
+      continueLink.hidden = false;
+      continueLink.style.display = 'inline-flex';
+      window.open(authUrl, '_blank');
+      toast('Opening Google sign-in. Click "Complete in Google ↗" if popup was blocked.', 'info');
+    } else {
+      toast(res.message || 'Reconnect request generated.', 'info');
     }
   } catch (err) {
     toast(err.message, 'error');
