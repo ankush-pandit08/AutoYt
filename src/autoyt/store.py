@@ -56,7 +56,6 @@ class Store:
             ''')
             if db.execute("SELECT max(version) FROM schema_version").fetchone()[0] < 2:
                 # Transactional SQLite table rebuild preserves existing private upload records.
-                db.execute("BEGIN IMMEDIATE")
                 db.execute("CREATE TABLE youtube_uploads_v2("
                            "job_id TEXT PRIMARY KEY REFERENCES video_jobs(id), video_id TEXT UNIQUE NOT NULL, "
                            "privacy TEXT NOT NULL CHECK(privacy IN ('private','public')), uploaded_at TEXT NOT NULL)")
@@ -64,6 +63,69 @@ class Store:
                 db.execute("DROP TABLE youtube_uploads")
                 db.execute("ALTER TABLE youtube_uploads_v2 RENAME TO youtube_uploads")
                 db.execute("INSERT OR IGNORE INTO schema_version VALUES(2)")
+            if db.execute("SELECT max(version) FROM schema_version").fetchone()[0] < 3:
+                # Migration 3: Podcast platform tables
+                db.executescript('''
+                    CREATE TABLE IF NOT EXISTS podcast_sources (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        show_name TEXT NOT NULL,
+                        youtube_channel_id TEXT,
+                        enabled INTEGER NOT NULL DEFAULT 1,
+                        config_json TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS podcast_episodes (
+                        id TEXT PRIMARY KEY,
+                        source_id TEXT NOT NULL,
+                        video_id TEXT NOT NULL,
+                        video_url TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        channel_name TEXT NOT NULL DEFAULT '',
+                        published_at TEXT NOT NULL,
+                        duration_seconds INTEGER,
+                        thumbnail_url TEXT,
+                        description TEXT,
+                        discovery_score REAL,
+                        topics_matched TEXT,
+                        status TEXT NOT NULL DEFAULT 'discovered',
+                        rights_status TEXT NOT NULL DEFAULT 'unknown',
+                        rights_basis TEXT,
+                        rights_notes TEXT,
+                        rights_verified_at TEXT,
+                        discovered_at TEXT NOT NULL,
+                        processed_at TEXT,
+                        error_message TEXT,
+                        UNIQUE(source_id, video_id)
+                    );
+                    CREATE TABLE IF NOT EXISTS podcast_clips (
+                        id TEXT PRIMARY KEY,
+                        episode_id TEXT NOT NULL,
+                        source_id TEXT NOT NULL,
+                        clip_index INTEGER NOT NULL,
+                        start_seconds REAL NOT NULL,
+                        end_seconds REAL NOT NULL,
+                        duration_seconds REAL NOT NULL,
+                        transcript_text TEXT,
+                        ai_score REAL,
+                        score_breakdown TEXT,
+                        generated_title TEXT,
+                        generated_description TEXT,
+                        hashtags TEXT,
+                        status TEXT NOT NULL DEFAULT 'candidate',
+                        output_path TEXT,
+                        thumbnail_path TEXT,
+                        youtube_video_id TEXT,
+                        youtube_url TEXT,
+                        upload_status TEXT,
+                        review_notes TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        FOREIGN KEY(episode_id) REFERENCES podcast_episodes(id)
+                    );
+                ''')
+                db.execute("INSERT OR IGNORE INTO schema_version VALUES(3)")
 
     @contextmanager
     def connect(self):
@@ -241,3 +303,198 @@ class Store:
                 query += " WHERE j.slot IS NOT NULL"
             return sum(datetime.fromisoformat(row[0]).astimezone(zone).date() == today
                        for row in db.execute(query))
+
+
+    # -------------------------------------------------------------------------
+    # Podcast platform — episode helpers
+    # -------------------------------------------------------------------------
+
+    def save_podcast_episode(self, episode: dict) -> None:
+        """Insert or replace a podcast episode record."""
+        with self.connect() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO podcast_episodes("
+                "id, source_id, video_id, video_url, title, channel_name, published_at, "
+                "duration_seconds, thumbnail_url, description, discovery_score, topics_matched, "
+                "status, rights_status, rights_basis, rights_notes, rights_verified_at, "
+                "discovered_at, processed_at, error_message"
+                ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    episode["id"],
+                    episode["source_id"],
+                    episode["video_id"],
+                    episode.get("video_url", ""),
+                    episode.get("title", ""),
+                    episode.get("channel_name", ""),
+                    episode.get("published_at", now()),
+                    episode.get("duration_seconds"),
+                    episode.get("thumbnail_url"),
+                    episode.get("description"),
+                    episode.get("discovery_score"),
+                    json.dumps(episode.get("topics_matched") or [], ensure_ascii=False),
+                    episode.get("status", "discovered"),
+                    episode.get("rights_status", "unknown"),
+                    episode.get("rights_basis"),
+                    episode.get("rights_notes"),
+                    episode.get("rights_verified_at"),
+                    episode.get("discovered_at", now()),
+                    episode.get("processed_at"),
+                    episode.get("error_message"),
+                ),
+            )
+
+    def get_podcast_episode(self, episode_id: str) -> dict | None:
+        """Return a single podcast episode by its ID, or None."""
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT * FROM podcast_episodes WHERE id=?", (episode_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["topics_matched"] = json.loads(d.get("topics_matched") or "[]")
+        return d
+
+    def list_podcast_episodes(
+        self,
+        status: str | None = None,
+        source_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """List podcast episodes with optional filters."""
+        clauses, params = [], []
+        if status:
+            clauses.append("status=?")
+            params.append(status)
+        if source_id:
+            clauses.append("source_id=?")
+            params.append(source_id)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        with self.connect() as db:
+            rows = db.execute(
+                f"SELECT * FROM podcast_episodes {where} "
+                "ORDER BY discovered_at DESC LIMIT ?",
+                (*params, limit),
+            ).fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            d["topics_matched"] = json.loads(d.get("topics_matched") or "[]")
+            result.append(d)
+        return result
+
+    def update_episode_status(self, episode_id: str, status: str, **kwargs) -> None:
+        """Update status and optional fields on a podcast episode."""
+        allowed = {
+            "rights_status", "rights_basis", "rights_notes", "rights_verified_at",
+            "processed_at", "error_message", "discovery_score",
+        }
+        extra = set(kwargs) - allowed
+        if extra:
+            raise ValueError(f"Unknown episode fields: {extra}")
+        sets = "status=?" + "".join(f",{k}=?" for k in kwargs)
+        with self.connect() as db:
+            db.execute(
+                f"UPDATE podcast_episodes SET {sets} WHERE id=?",
+                (status, *kwargs.values(), episode_id),
+            )
+
+    # -------------------------------------------------------------------------
+    # Podcast platform — clip helpers
+    # -------------------------------------------------------------------------
+
+    def save_podcast_clip(self, clip: dict) -> None:
+        """Insert or replace a podcast clip record."""
+        ts = now()
+        with self.connect() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO podcast_clips("
+                "id, episode_id, source_id, clip_index, start_seconds, end_seconds, "
+                "duration_seconds, transcript_text, ai_score, score_breakdown, "
+                "generated_title, generated_description, hashtags, status, "
+                "output_path, thumbnail_path, youtube_video_id, youtube_url, "
+                "upload_status, review_notes, created_at, updated_at"
+                ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    clip["id"],
+                    clip["episode_id"],
+                    clip["source_id"],
+                    clip["clip_index"],
+                    clip["start_seconds"],
+                    clip["end_seconds"],
+                    clip["duration_seconds"],
+                    clip.get("transcript_text"),
+                    clip.get("ai_score"),
+                    json.dumps(clip.get("score_breakdown") or {}, ensure_ascii=False),
+                    clip.get("generated_title"),
+                    clip.get("generated_description"),
+                    json.dumps(clip.get("hashtags") or [], ensure_ascii=False),
+                    clip.get("status", "candidate"),
+                    clip.get("output_path"),
+                    clip.get("thumbnail_path"),
+                    clip.get("youtube_video_id"),
+                    clip.get("youtube_url"),
+                    clip.get("upload_status"),
+                    clip.get("review_notes"),
+                    clip.get("created_at", ts),
+                    clip.get("updated_at", ts),
+                ),
+            )
+
+    def get_podcast_clip(self, clip_id: str) -> dict | None:
+        """Return a single podcast clip by its ID, or None."""
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT * FROM podcast_clips WHERE id=?", (clip_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["score_breakdown"] = json.loads(d.get("score_breakdown") or "{}")
+        d["hashtags"] = json.loads(d.get("hashtags") or "[]")
+        return d
+
+    def list_podcast_clips(
+        self,
+        episode_id: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        """List podcast clips with optional filters."""
+        clauses, params = [], []
+        if episode_id:
+            clauses.append("episode_id=?")
+            params.append(episode_id)
+        if status:
+            clauses.append("status=?")
+            params.append(status)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        with self.connect() as db:
+            rows = db.execute(
+                f"SELECT * FROM podcast_clips {where} "
+                "ORDER BY created_at DESC LIMIT ?",
+                (*params, limit),
+            ).fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            d["score_breakdown"] = json.loads(d.get("score_breakdown") or "{}")
+            d["hashtags"] = json.loads(d.get("hashtags") or "[]")
+            result.append(d)
+        return result
+
+    def update_clip_status(self, clip_id: str, status: str, **kwargs) -> None:
+        """Update status and optional fields on a podcast clip."""
+        allowed = {
+            "output_path", "thumbnail_path", "youtube_video_id", "youtube_url",
+            "upload_status", "review_notes", "ai_score",
+        }
+        extra = set(kwargs) - allowed
+        if extra:
+            raise ValueError(f"Unknown clip fields: {extra}")
+        sets = "status=?,updated_at=?" + "".join(f",{k}=?" for k in kwargs)
+        with self.connect() as db:
+            db.execute(
+                f"UPDATE podcast_clips SET {sets} WHERE id=?",
+                (status, now(), *kwargs.values(), clip_id),
+            )

@@ -1,68 +1,509 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light"><title>AutoYT · Control room</title><link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script></head>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>AutoYT Clips · Automated Podcast Shorts Studio</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
 <body>
-<a class="skip-link" href="#mainContent">Skip to main content</a>
-<aside class="sidebar">
-  <a class="brand" href="#overview" aria-label="AutoYT overview"><span class="brandmark" aria-hidden="true">▶</span>AutoYT<span class="branddot" aria-hidden="true">•</span></a>
-  <p class="workspace">YOUR CHANNEL WORKSPACE</p>
-  <nav aria-label="Main navigation">
-    <a href="#overview" aria-current="location"><span aria-hidden="true">◫</span>Overview</a>
-    <a href="#create"><span aria-hidden="true">＋</span>Create video</a>
-    <a href="#videos"><span aria-hidden="true">▤</span>Video library</a>
-    <a href="#settings"><span aria-hidden="true">⚙</span>Production settings</a>
-    <a href="#schedule"><span aria-hidden="true">◷</span>Schedule</a>
-    <a href="#activity"><span aria-hidden="true">≋</span>Activity</a>
-  </nav>
-  <div class="sidebar-bottom"><span class="local-dot" aria-hidden="true"></span>Runs on your machine<p>Keep AutoYT open and your computer awake for scheduled runs.</p></div>
-</aside>
-<main id="mainContent" tabindex="-1">
-  <header class="topbar"><span class="breadcrumb">WORKSPACE <span>/</span> CONTROL ROOM</span><span id="connection" class="connection" role="status">Connecting…</span></header>
-  <section id="overview" class="page-heading"><div><p class="eyebrow">YOUR CONTENT, IN MOTION</p><h1>Channel overview</h1><p class="muted">Create with confidence. Keep an eye on every run.</p></div><a class="button primary" href="#create">＋ Create a video</a></section>
-  <div id="offline" class="notice warning" role="alert" hidden><div><strong>Connection interrupted</strong><p>Showing the last update. Actions are disabled until the dashboard reconnects.</p></div><button id="reconnect" class="button secondary">Reconnect</button></div>
-  <div id="toast" class="toast" role="status" hidden><span id="toastText"></span><button id="dismissToast" class="icon-button" aria-label="Dismiss notification">×</button></div>
-  <section class="metrics" aria-label="Today's results">
-    <article class="card metric"><span>Uploaded today</span><strong id="uploaded">—</strong><small id="target">Waiting for your schedule</small></article>
-    <article class="card metric"><span>Runs started today</span><strong id="attempts">—</strong><small>Includes automatic and manual runs</small></article>
-    <article class="card metric"><span>Need attention today</span><strong id="failed">—</strong><small>Failed runs are available to review</small></article>
-    <article class="card metric"><span>Next scheduled run</span><strong id="next">—</strong><small id="timezone">Asia/Kolkata</small><small id="nextCountdown" role="timer">Waiting for schedule</small></article>
-  </section>
-  <section class="card pipeline-card" aria-labelledby="pipelineHeading"><div class="section-heading"><div><p class="eyebrow">LIVE STATUS</p><h2 id="pipelineHeading">Current run</h2><p id="liveTitle">Connecting to your local pipeline…</p></div><span id="liveBadge" class="badge neutral">CONNECTING</span></div><ol id="pipeline" class="pipeline" aria-label="Video production stages"></ol><div class="pipeline-foot"><span id="liveNote">Your latest progress will appear here.</span><span id="disk"></span></div></section>
-  <div class="overview-grid">
-    <section class="card automation" aria-labelledby="autoHeading"><div class="section-heading"><div><h2 id="autoHeading">Automatic publishing <span id="autoBadge" class="badge neutral">Loading</span></h2><p id="autoDescription">Reading your local schedule…</p></div></div><div class="card-body"><p class="help">Pause future scheduled runs at any time. A video already in progress can finish.</p><button id="toggle" class="button secondary" disabled>Loading schedule…</button></div></section>
-    <section class="card automatic-topic" aria-labelledby="automaticHeading"><div class="section-heading"><div><h2 id="automaticHeading">Let AutoYT choose a topic</h2><p>Start now using your saved production settings.</p></div></div><div class="card-body"><div class="actions"><button id="preview" class="button secondary" disabled>Preview automatic topic</button><button id="run" class="button primary" disabled>Find topic & create</button></div><p id="automaticNote" class="help">Previews never upload. Publishing always shows a confirmation first.</p></div></section>
+  <div class="app-layout">
+    <!-- SIDEBAR NAVIGATION -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-icon yt-brand-badge" title="AutoYT Studio">
+          <svg viewBox="0 0 28 20" width="30" height="22" fill="currentColor">
+            <path fill="#ea4335" d="M27.4 3.1c-.3-1.2-1.3-2.1-2.5-2.4C22.7.2 14 .2 14 .2s-8.7 0-10.9.5C1.9 1 1 1.9.6 3.1 0 5.3 0 10 0 10s0 4.7.6 6.9c.3 1.2 1.3 2.1 2.5 2.4 2.2.5 10.9.5 10.9.5s8.7 0 10.9-.5c1.2-.3 2.1-1.2 2.5-2.4.6-2.2.6-6.9.6-6.9s0-4.7-.6-6.9z"/>
+            <path fill="#FFFFFF" d="M11.2 14.3l7.3-4.3-7.3-4.3v8.6z"/>
+          </svg>
+        </span>
+        <div class="brand-text">
+          <h2>AutoYT <span class="yt-badge-tag">Studio</span></h2>
+          <p>Shorts &amp; Podcast Automation</p>
+        </div>
+      </div>
+
+      <nav class="nav-menu" aria-label="Main navigation">
+        <a href="#clipsStudio" class="nav-item active" data-tab="clipsStudio">
+          <span class="nav-icon">✂️</span>
+          <span>Clips Studio</span>
+          <span id="badgeQueueCount" class="nav-badge">0</span>
+        </a>
+        <a href="#automationSchedule" class="nav-item" data-tab="automationSchedule">
+          <span class="nav-icon">⏰</span>
+          <span>Daily Automation</span>
+          <span class="nav-badge" style="background:var(--success);">5/DAY</span>
+        </a>
+        <a href="#manualCreator" class="nav-item" data-tab="manualCreator">
+          <span class="nav-icon">⚡</span>
+          <span>Create Shorts</span>
+        </a>
+        <a href="#episodesFeed" class="nav-item" data-tab="episodesFeed">
+          <span class="nav-icon">🎙️</span>
+          <span>Episodes Feed</span>
+        </a>
+        <a href="#sourcesSettings" class="nav-item" data-tab="sourcesSettings">
+          <span class="nav-icon">📡</span>
+          <span>Creators & Channel</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="connection-status">
+          <span id="connDot" class="status-dot online"></span>
+          <span id="connText">Connected</span>
+        </div>
+        <p class="footer-note">Single-user local platform · YouTube OAuth active</p>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT AREA -->
+    <main class="main-content" id="mainContent">
+      <!-- TOPBAR -->
+      <header class="topbar">
+        <div class="topbar-title">
+          <h1 id="pageTitle">Channel overview & Clips Studio</h1>
+          <p id="pageSubtitle">Review AI-extracted 9:16 vertical Shorts and publish to YouTube in private mode</p>
+        </div>
+
+        <div class="topbar-actions">
+          <button id="autoClipBtn" class="btn btn-gradient" type="button" title="Automatically pick top-scored episode and generate clips">
+            <span>🤖</span> Auto-Clip Top Episode
+          </button>
+          <button id="refreshBtn" class="btn btn-secondary" type="button" title="Refresh all data">
+            <span>↻</span> Refresh
+          </button>
+        </div>
+      </header>
+
+      <!-- NOTIFICATION TOAST -->
+      <div id="toast" class="toast" role="status" hidden>
+        <span id="toastIcon">ℹ️</span>
+        <span id="toastText"></span>
+        <button id="dismissToast" class="toast-close" type="button">×</button>
+      </div>
+
+      <!-- METRICS BAR -->
+      <section class="metrics-grid">
+        <div class="metric-card">
+          <span class="metric-label">Discovered Episodes</span>
+          <strong id="statDiscovered" class="metric-value">0</strong>
+          <span class="metric-hint">Across configured shows</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Authorized Rights</span>
+          <strong id="statAuthorized" class="metric-value">0</strong>
+          <span class="metric-hint">Approved for clipping</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Shorts Generated</span>
+          <strong id="statGenerated" class="metric-value">0</strong>
+          <span class="metric-hint">9:16 vertical videos</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Awaiting Review</span>
+          <strong id="statAwaiting" class="metric-value highlight">0</strong>
+          <span class="metric-hint">Ready for approval</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Uploaded to YouTube</span>
+          <strong id="statUploaded" class="metric-value success">0</strong>
+          <span class="metric-hint">Private review mode</span>
+        </div>
+      </section>
+
+      <!-- AUTOMATION LIVE BANNER -->
+      <section class="card automation-banner-card">
+        <div class="automation-banner-inner">
+          <div class="automation-banner-status">
+            <span class="status-indicator-live">
+              <span class="live-dot"></span>
+              24/7 AUTOMATION RUNNING
+            </span>
+            <h3>Daily 5-Shorts Evening Publisher</h3>
+            <p id="automationBannerSummary">Automated publishing window: <strong>7:00 PM – 9:00 PM IST</strong> daily · <span id="bannerNextSlot">Next: Slot 1/5 at 7:00 PM IST</span></p>
+          </div>
+          <div class="automation-banner-actions">
+            <button id="btnQuickPublishSlot" class="btn btn-primary btn-sm" type="button" title="Immediately trigger the next automated Short publish">
+              <span>🚀</span> Publish Next Slot Now
+            </button>
+            <button id="btnViewScheduleTab" class="btn btn-secondary btn-sm" type="button" title="View all 5 evening slots and automated discovery pipeline">
+              <span>⏰</span> View Schedule
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- HERO: INSTANT CLIPPER / MANUAL LINK INPUT -->
+      <section id="manualCreatorSection" class="card creator-card">
+        <div class="card-header">
+          <div>
+            <span class="card-tag">MANUAL OR AUTOMATED</span>
+            <h2>Instant Podcast / Video Clipper</h2>
+            <p>Paste any YouTube podcast or video URL to automatically transcribe, find viral moments, and generate 9:16 Shorts with Raj Shamani bold animated subtitles.</p>
+          </div>
+        </div>
+
+        <form id="manualClipForm" class="clip-form">
+          <div class="input-row">
+            <div class="input-group flex-grow">
+              <label for="videoUrlInput">YouTube Video or Podcast URL</label>
+              <div class="input-with-icon">
+                <span class="input-icon">🔗</span>
+                <input id="videoUrlInput" type="url" required placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/..." autocomplete="off">
+              </div>
+              <div class="quick-samples">
+                <span class="quick-label">Quick load:</span>
+                <button type="button" class="sample-pill" data-url="https://www.youtube.com/watch?v=POGm7I_DmIo">🎙️ Prakhar Gupta</button>
+                <button type="button" class="sample-pill" data-url="https://www.youtube.com/watch?v=noaa5xU3PyU">⚡ Raj Shamani</button>
+                <button type="button" class="sample-pill" data-url="https://www.youtube.com/watch?v=dACbZkSH_UU">🔥 Ranveer Allahbadia</button>
+              </div>
+            </div>
+
+            <div class="input-group">
+              <label for="clipsCountSelect">Clips Count</label>
+              <select id="clipsCountSelect">
+                <option value="1">1 Short</option>
+                <option value="2">2 Shorts</option>
+                <option value="3" selected>3 Shorts (Recommended)</option>
+                <option value="4">4 Shorts</option>
+                <option value="5">5 Shorts</option>
+              </select>
+            </div>
+
+            <div class="input-group">
+              <label for="subtitleStyleSelect">Subtitle Style</label>
+              <select id="subtitleStyleSelect">
+                <option value="dynamic" selected>Dynamic (Raj Shamani Bold + Yellow Pop)</option>
+                <option value="bold">Bold Motivational (High Contrast)</option>
+                <option value="minimal">Minimal Clean (White Typography)</option>
+              </select>
+            </div>
+
+            <div class="input-group">
+              <label for="bgmSelect">Background Music</label>
+              <select id="bgmSelect">
+                <option value="auto" selected>Auto-Match Vibe (Recommended)</option>
+                <option value="motivational">Motivational Beat (Superepic)</option>
+                <option value="inspirational">Inspirational Strings (Art of Silence)</option>
+                <option value="serious">Serious &amp; Truth (Winter Night)</option>
+                <option value="comedy">Comedy &amp; Banter (Carefree)</option>
+                <option value="mindset">Mindset &amp; Chill (Tranquility)</option>
+                <option value="none">None (Original Audio Only)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-bottom-row">
+            <label class="checkbox-label">
+              <input id="autoUploadCheck" type="checkbox">
+              <span>Auto-Publish top scored clip to YouTube (Private Review Mode)</span>
+            </label>
+
+            <button id="startClippingBtn" type="submit" class="btn btn-primary btn-lg">
+              <span>🚀</span> Generate 9:16 Shorts
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <!-- SECTION 1: CLIPS STUDIO & REVIEW GALLERY -->
+      <section id="clipsStudioSection" class="content-section">
+        <div class="section-toolbar">
+          <div class="toolbar-left">
+            <h2>Generated Shorts Gallery</h2>
+            <span id="clipsFilterInfo" class="toolbar-hint">Showing all extracted clips</span>
+          </div>
+
+          <div class="toolbar-filters">
+            <button class="filter-pill active" data-filter="all">All Clips (<span id="countAll">0</span>)</button>
+            <button class="filter-pill" data-filter="candidate">Awaiting Review (<span id="countCandidate">0</span>)</button>
+            <button class="filter-pill" data-filter="approved">Approved (<span id="countApproved">0</span>)</button>
+            <button class="filter-pill" data-filter="uploaded">Uploaded (<span id="countUploaded">0</span>)</button>
+          </div>
+        </div>
+
+        <div id="clipsGrid" class="clips-grid">
+          <!-- Dynamic Clips Cards -->
+          <div class="empty-state">
+            <span class="empty-icon">✂️</span>
+            <h3>No clips extracted yet</h3>
+            <p>Paste a YouTube podcast link above or click "Auto-Clip Top Episode" to generate high-engagement Shorts!</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECTION 2: DISCOVERED EPISODES FEED -->
+      <section id="episodesFeedSection" class="content-section" hidden>
+        <div class="section-toolbar">
+          <div class="toolbar-left">
+            <h2>Discovered Podcast Episodes</h2>
+            <p class="toolbar-hint">Episodes discovered from your configured creators with relevance ranking</p>
+          </div>
+          <button id="discoverEpisodesBtn" class="btn btn-secondary" type="button">
+            <span>🔍</span> Discover New Episodes
+          </button>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Episode Title</th>
+                <th>Creator / Show</th>
+                <th>Duration</th>
+                <th>Relevance Score</th>
+                <th>Rights Status</th>
+                <th class="text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="episodesTableBody">
+              <tr><td colspan="6" class="table-loading">Loading discovered episodes...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- SECTION 3: CREATORS & CHANNEL SETTINGS -->
+      <section id="sourcesSettingsSection" class="content-section" hidden>
+        <div class="section-toolbar">
+          <div class="toolbar-left">
+            <h2>Creators & YouTube Publishing</h2>
+            <p class="toolbar-hint">Manage podcast sources and YouTube channel authorization</p>
+          </div>
+        </div>
+
+        <div class="settings-grid">
+          <!-- YouTube Channel Status Card -->
+          <div class="card settings-card">
+            <div class="card-header">
+              <div>
+                <h3>YouTube Channel Connection</h3>
+                <p>Authenticates Shorts uploads directly to your YouTube channel in private review mode.</p>
+              </div>
+              <span id="ytBadge" class="badge badge-success">Active</span>
+            </div>
+            <div class="card-body">
+              <div class="yt-status-box">
+                <span class="yt-icon">🔴</span>
+                <div>
+                  <strong id="ytChannelName">Connected YouTube Channel</strong>
+                  <p id="ytStatusNote">OAuth token verified. Finished videos upload in private mode for safety.</p>
+                </div>
+              </div>
+              <div class="actions-row">
+                <button id="ytReconnectBtn" class="btn btn-secondary" type="button">Reconnect Channel</button>
+                <a id="ytAuthContinueLink" class="btn btn-primary" target="_blank" rel="noopener noreferrer" hidden>Complete in Google ↗</a>
+              </div>
+            </div>
+          </div>
+
+          <!-- Configured Sources List -->
+          <div class="card settings-card">
+            <div class="card-header">
+              <div>
+                <h3>Configured Podcast Creators</h3>
+                <p>Supported creators monitored by the automatic discovery engine.</p>
+              </div>
+            </div>
+            <div class="card-body">
+              <div id="sourcesList" class="sources-list">
+                <!-- Dynamic Sources List -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECTION 4: 24/7 AUTOMATION & EVENING SCHEDULE -->
+      <section id="automationScheduleSection" class="content-section" hidden>
+        <div class="section-toolbar">
+          <div class="toolbar-left">
+            <h2>Daily Shorts Automation &amp; Schedule</h2>
+            <p class="toolbar-hint">Automated background publisher running 5 Shorts every evening between 7:00 PM and 9:00 PM IST</p>
+          </div>
+          <div class="toolbar-actions">
+            <button id="btnPrepareQueueNow" class="btn btn-secondary" type="button">
+              <span>⚡</span> Prepare Evening Queue
+            </button>
+            <button id="btnRefreshSchedule" class="btn btn-secondary" type="button">
+              <span>↻</span> Refresh
+            </button>
+          </div>
+        </div>
+
+        <!-- Schedule Overview Cards -->
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <span class="metric-label">Daily Frequency</span>
+            <strong class="metric-value highlight">5 / Day</strong>
+            <span class="metric-hint">7:00 PM – 9:00 PM IST</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Timezone</span>
+            <strong class="metric-value">IST</strong>
+            <span id="currentTimeDisplay" class="metric-hint">Asia/Kolkata</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Next Scheduled Run</span>
+            <strong id="nextSlotDisplay" class="metric-value highlight" style="font-size:22px;">19:00 IST</strong>
+            <span id="nextSlotLabel" class="metric-hint">Slot 1/5</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Queue Readiness</span>
+            <strong id="queueCountDisplay" class="metric-value success">0 Ready</strong>
+            <span id="queueHealthLabel" class="metric-hint">For tonight's window</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Publish Privacy</span>
+            <strong class="metric-value" style="font-size:22px;">Private</strong>
+            <span class="metric-hint">Safe for review before public</span>
+          </div>
+        </div>
+
+        <!-- 5 Evening Publishing Slots Grid -->
+        <div class="card schedule-slots-card">
+          <div class="card-header">
+            <div>
+              <span class="card-tag">DAILY 7:00 PM – 9:00 PM IST WINDOW</span>
+              <h3>Evening 5-Shorts Publishing Slots</h3>
+              <p>Five evenly spaced slots during peak evening YouTube Shorts viewer engagement hours (every 30 minutes).</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="scheduleSlotsList" class="schedule-slots-grid">
+              <!-- Rendered dynamically -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Daily Automated Pipeline Stages -->
+        <div class="card schedule-pipeline-card">
+          <div class="card-header">
+            <div>
+              <span class="card-tag">FULL 24/7 PIPELINE AUTOMATION</span>
+              <h3>Automated Daily Workflow Stages</h3>
+              <p>The system runs discovery, AI clipping, dynamic subtitles, copyright-free BGM matching, and publishing automatically.</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="pipeline-timeline">
+              <div class="pipeline-step">
+                <div class="step-time">08:00 IST</div>
+                <div class="step-info">
+                  <h4>Morning Episode Discovery</h4>
+                  <p>Scans configured channels (Prakhar Gupta, Raj Shamani, Ranveer Allahbadia, etc.) for new podcast episodes.</p>
+                </div>
+                <span class="badge badge-success">Automated</span>
+              </div>
+              <div class="pipeline-step">
+                <div class="step-time">14:00 IST</div>
+                <div class="step-info">
+                  <h4>AI Processing &amp; Dynamic Subtitles</h4>
+                  <p>Transcribes speech, finds viral hooks with highest retention scores, applies Raj Shamani bold animated subtitles, and blends copyright-free background music with audio ducking (-18dB).</p>
+                </div>
+                <span class="badge badge-success">Automated</span>
+              </div>
+              <div class="pipeline-step">
+                <div class="step-time">18:00 IST</div>
+                <div class="step-info">
+                  <h4>Pre-Window Queue Preparation</h4>
+                  <p>Verifies at least 5 ready clips in the queue for tonight. If needed, clips the highest-ranked discovered episode.</p>
+                </div>
+                <span class="badge badge-success">Automated</span>
+              </div>
+              <div class="pipeline-step">
+                <div class="step-time">19:00 – 21:00 IST</div>
+                <div class="step-info">
+                  <h4>5-Shorts Evening Publishing Window</h4>
+                  <p>Publishes 1 Short every 30 minutes (19:00, 19:30, 20:00, 20:30, 21:00 IST) to YouTube with metadata and descriptions.</p>
+                </div>
+                <span class="badge badge-success">Active 24/7</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
   </div>
 
-  <section id="create" class="card create-card" aria-labelledby="customHeading">
-    <div class="section-heading"><div><p class="eyebrow">YOUR NEXT SHORT</p><h2 id="customHeading">Create from your idea</h2><p>Research a specific topic or bring your own narration.</p></div><span class="badge neutral">MANUAL RUN</span></div>
-    <div class="create-grid"><form id="customForm" class="custom-form">
-      <div class="field"><label for="customMode">Start with</label><select id="customMode"><option value="topic">A topic to research</option><option value="script">My own script</option></select></div>
-      <div id="customTopicRow" class="field" hidden><label for="customTopic">Video topic</label><input id="customTopic" maxlength="180" placeholder="e.g. How passkeys protect your accounts"></div>
-      <div class="field"><label id="customLabel" for="customContent">What should this video explain?</label><textarea id="customContent" rows="4" minlength="3" maxlength="180" required aria-describedby="customHelp customCount customError" placeholder="e.g. How passkeys protect your accounts"></textarea><div class="field-meta"><p id="customHelp" class="help">We research this topic and write an original script.</p><span id="customCount" class="count">0 / 180 characters</span></div><p id="customError" class="field-error" role="status" hidden></p></div>
-      <aside id="customScriptFormat" class="notice info" hidden><div><strong>Paste only the words to be spoken</strong><p>Use 12–180 words. No scene labels, timestamps, links or directions are needed. Your narration stays unchanged.</p></div></aside>
-      <details class="custom-sources"><summary>Add source links <span class="muted">(optional)</span></summary><div class="field"><label id="customSourceLabel" for="customSources">Supporting sources</label><textarea id="customSources" rows="2" aria-describedby="customSourceHelp" placeholder="One HTTPS source link per line"></textarea><p id="customSourceHelp" class="help">Up to six links.</p></div></details>
-      <div class="field"><label for="runStyle">Style for this video</label><select id="runStyle"><option value="default">Use saved default</option><option value="normal">Normal · images and footage</option><option value="motion_graphics">Motion Graphics · fully animated</option><option value="hybrid">Hybrid · animation and footage</option></select><p class="help">An override applies to this video only.</p></div>
-      <div class="form-footer"><p id="customUploadNote" class="help">Waiting for production settings.</p><div class="actions"><button id="customPreview" type="button" class="button secondary" disabled>Create preview</button><button id="customRun" type="submit" class="button primary" disabled>Create video</button></div></div>
-    </form><aside class="run-summary" aria-labelledby="summaryHeading"><h3 id="summaryHeading">Production for this run</h3><dl><dt>Script model</dt><dd id="summaryModel">—</dd><dt>Narration</dt><dd id="summaryVoice">—</dd><dt>Video style</dt><dd id="summaryStyle">—</dd><dt>Publishing</dt><dd id="summaryUpload">—</dd></dl><p class="help">Only saved settings are used. Changing a setting below won't affect a video already in progress.</p><a href="#settings">Edit production settings →</a></aside></div>
-  </section>
+  <!-- VIDEO PREVIEW & EDIT MODAL -->
+  <dialog id="clipModal" class="modal" aria-labelledby="modalClipTitle">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modalClipTitle">Preview Short</h3>
+        <button id="closeClipModal" class="modal-close" type="button">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-video-col">
+          <video id="modalVideoPlayer" controls playsinline preload="metadata" class="video-preview-player"></video>
+        </div>
+        <div class="modal-details-col">
+          <div class="detail-group">
+            <label for="editTitleInput">Shorts Title (curiosity-inducing with #Shorts)</label>
+            <input id="editTitleInput" type="text" class="input-text" maxlength="100">
+          </div>
 
-  <section id="videos" class="card library" aria-labelledby="libraryHeading"><div class="section-heading"><div><h2 id="libraryHeading">Video library</h2><p id="libraryCount">Loading recent runs…</p></div><div class="library-tools"><label class="sr-only" for="searchJobs">Search video titles or run IDs</label><input id="searchJobs" type="search" placeholder="Search videos…" autocomplete="off"><label class="sr-only" for="filter">Filter videos by status</label><select id="filter"><option value="all">All runs</option><option value="active">In progress</option><option value="PUBLISHED">Published</option><option value="AWAITING_REVIEW">Private uploads</option><option value="previews">Previews</option><option value="FAILED">Failed</option><option value="READY_TO_UPLOAD">Ready</option><option value="SKIPPED">Skipped</option></select></div></div><div class="table-scroll"><table><caption class="sr-only">Recent video runs and their status</caption><thead><tr><th scope="col">Video / topic</th><th scope="col">Status</th><th scope="col">Progress</th><th scope="col">Created</th><th scope="col"><span class="sr-only">Run details</span></th></tr></thead><tbody id="jobs"><tr><td colspan="5" class="empty">Connecting to your video library…</td></tr></tbody></table></div></section>
+          <div class="detail-group">
+            <label for="editDescInput">Description & Attribution</label>
+            <textarea id="editDescInput" rows="7" class="input-textarea"></textarea>
+          </div>
 
-  <section id="settings" class="settings-section" aria-labelledby="settingsHeading"><div class="section-heading outside"><div><p class="eyebrow">YOUR DEFAULTS</p><h2 id="settingsHeading">Production settings</h2><p>Save changes per card. They apply to new runs, including scheduled videos.</p></div></div>
-    <div class="settings-grid">
-      <section id="youtubeConnection" class="card settings-card voice-card" aria-labelledby="youtubeConnectionHeading"><div class="section-heading"><div><h3 id="youtubeConnectionHeading">YouTube connection</h3><p>Reconnect your Google account when saved upload permission expires.</p></div><span id="youtubeAuthState" class="badge neutral">Loading</span></div><div class="card-body"><p id="youtubeAuthMessage" class="help" role="status">Checking saved authorization…</p><p class="help">Select the same YouTube channel in Google. Reconnecting saves authorization on this machine; it does not start an upload. After connecting, retry your saved failed video.</p><div class="actions"><button id="reconnectYoutube" type="button" class="button primary" disabled>Reconnect YouTube</button><button id="cancelYoutubeAuth" type="button" class="button quiet" hidden>Cancel connection</button><a id="youtubeAuthLink" class="button secondary" target="_blank" rel="noopener noreferrer" hidden>Continue with Google ↗</a></div></div></section>
-      <section class="card settings-card" aria-labelledby="scriptModelHeading"><div class="section-heading"><div><h3 id="scriptModelHeading">Script generation</h3><p>The AI used for research and original writing.</p></div><span id="scriptSaveState" class="badge neutral">Loading</span></div><form id="scriptModelForm" class="card-body"><div class="field"><label for="scriptProvider">Script provider</label><select id="scriptProvider" required><option value="groq">Groq</option><option value="gemini">Gemini</option><option value="openrouter">OpenRouter · free model</option><option value="ollama">Ollama · local models</option></select><div id="localScriptModelRow" class="field" hidden><label for="localScriptModel">Local script model</label><select id="localScriptModel"><option value="gemma3:4b">Gemma 3 4B · recommended</option><option value="qwen3:8b">Qwen 3 8B · larger, slower</option></select></div><p id="scriptModelInfo" class="help"></p></div><p id="scriptFailoverNote" class="help">Voice selection is separate. Configured backups are tried automatically when a script provider reaches its quota or becomes unavailable. OpenRouter uses free models only.</p><p id="scriptModelMessage" class="form-message" role="status"></p><div class="form-actions"><button id="resetScript" type="button" class="button quiet" disabled>Discard changes</button><button id="saveScriptModel" type="submit" class="button primary" disabled>Save script provider</button></div></form></section>
-      <section class="card settings-card" aria-labelledby="renderHeading"><div class="section-heading"><div><h3 id="renderHeading">Video style</h3><p>The saved default for new videos.</p></div><span id="renderSaveState" class="badge neutral">Loading</span></div><form id="renderForm" class="card-body"><div class="field"><label for="renderMode">Default rendering mode</label><select id="renderMode"><option value="normal">Normal · images and footage</option><option value="motion_graphics">Motion Graphics · fully animated</option><option value="hybrid">Hybrid · animation and footage</option></select><p id="renderAvailability" class="help"></p></div><label class="check-label"><input type="checkbox" id="renderFallback" checked><span>Use Normal if motion rendering fails<small>Any fallback is recorded in run details.</small></span></label><div class="creative-options"><label class="check-label"><input type="checkbox" id="motionIcons" checked><span>Animated icons<small>Offline Iconify + Lucide icons matched to the topic. Motion and Hybrid scenes.</small></span></label><label class="check-label"><input type="checkbox" id="motionLottie" checked><span>Lottie animations<small>Imported LottieFiles vectors, with an original pulse as fallback. Motion and Hybrid scenes.</small></span></label><label class="check-label"><input type="checkbox" id="soundEffects" checked><span>Subtle sound effects<small>Imported CC0 sounds or original accents, ducked under narration. All video styles.</small></span></label></div><p id="renderMessage" class="form-message" role="status"></p><div class="form-actions"><button id="resetRender" type="button" class="button quiet" disabled>Discard changes</button><button id="saveRender" type="submit" class="button primary" disabled>Save video style</button></div></form></section>
-      <section id="voiceSettings" class="card settings-card voice-card" aria-labelledby="voiceHeading"><div class="section-heading"><div><h3 id="voiceHeading">Voice & language</h3><p>Narration for new scripts. Existing scripts aren't translated.</p></div><span id="voiceSaveState" class="badge neutral">Loading</span></div><form id="voiceForm" class="card-body"><div class="voice-fields"><div class="field"><label for="voiceProvider">Voice provider</label><select id="voiceProvider"><option value="kokoro">Kokoro · local</option><option value="sapi">Windows SAPI · local</option><option value="piper">Piper · local</option><option value="indicf5">IndicF5 · local</option><option value="gemini">Gemini TTS · API</option><option value="elevenlabs">ElevenLabs Flash v2.5 · API</option></select></div><div class="field"><label for="scriptLanguage">Narration language</label><select id="scriptLanguage"><option value="en">English</option><option value="hi">Hindi</option><option value="hinglish">Hinglish</option></select></div><div id="localVoiceRow" class="field"><label for="localVoice">Voice name</label><input id="localVoice" maxlength="80" autocomplete="off" aria-describedby="voiceProviderHelp"><p id="voiceProviderHelp" class="help"></p></div><div id="elevenVoiceRow" class="field" hidden><label for="elevenVoice">ElevenLabs voice</label><select id="elevenVoice" aria-describedby="elevenVoiceHelp"><option value="">Choose a voice</option></select><div class="actions"><button id="loadVoices" type="button" class="text-button">Load voices</button><button id="moreVoices" type="button" class="text-button" hidden>Load more</button></div><p id="elevenVoiceHelp" class="help" role="status">Voices load from your ElevenLabs account.</p></div></div><p id="elevenNotice" class="notice warning" hidden>ElevenLabs' free plan does not include commercial-use rights. Tests and narration consume API credits.</p><div class="voice-test"><button id="testVoice" type="button" class="button secondary" disabled>Test voice</button><span id="voiceTestHelp" class="help">A short sample. Your settings are not saved by testing.</span></div><audio id="voiceAudio" controls preload="none" hidden></audio><p id="voiceMessage" class="form-message" role="status"></p><div class="form-actions"><button id="resetVoice" type="button" class="button quiet" disabled>Discard changes</button><button id="saveVoice" type="submit" class="button primary" disabled>Save voice settings</button></div></form></section>
-      <section class="card settings-card voice-card" aria-labelledby="creativeHeading"><div class="section-heading"><div><h3 id="creativeHeading">Creative asset library</h3><p>Import downloaded assets once. AutoYT selects them by topic tags.</p></div><span class="badge neutral">Local library</span></div><div class="card-body"><p id="creativeLibrarySummary" class="help" role="status">Reading library…</p><p class="help">Original animation and sound effects are included. No API key is needed. Import a free LottieFiles JSON or a Freesound CC0 sound from its asset page.</p><details><summary>Add an animation or sound</summary><form id="creativeImportForm" class="creative-import"><div class="field-grid"><div class="field"><label for="creativeKind">Asset type</label><select id="creativeKind"><option value="animation">LottieFiles · vector JSON</option><option value="sound_effect">Freesound · CC0 audio</option></select></div><div class="field"><label for="creativeFile">Downloaded file</label><input id="creativeFile" type="file" accept=".json" required><p id="creativeFileHelp" class="help">Vector-only JSON, up to 2 MB. No external images, fonts or expressions.</p></div><div class="field"><label for="creativeName">Asset name</label><input id="creativeName" maxlength="80" required></div><div class="field"><label for="creativeAuthor">Creator</label><input id="creativeAuthor" maxlength="100" required></div><div class="field"><label for="creativeSource">Original asset page</label><input id="creativeSource" type="url" placeholder="https://lottiefiles.com/free-animation/…" required></div><div class="field"><label for="creativeTags">Topic tags (comma-separated)</label><input id="creativeTags" placeholder="ai, coding, cloud" maxlength="370" required></div></div><label class="check-label"><input id="creativeRights" type="checkbox" required><span id="creativeLicenseLabel">I checked that this asset is under the Lottie Simple License.</span></label><p class="help">Freesound imports accept CC0 only. Attribution-required and non-commercial sounds are excluded. Imported content is decorative; it does not replace factual visuals.</p><button id="importCreative" class="button secondary" type="submit">Import asset</button><p id="creativeImportMessage" class="form-message" role="status"></p></form></details><ul id="creativeLibraryItems" class="creative-library"></ul></div></section>
+          <div class="detail-meta-box">
+            <div><span class="meta-label">AI Score:</span> <strong id="modalClipScore">—</strong></div>
+            <div><span class="meta-label">Duration:</span> <span id="modalClipDuration">—</span></div>
+            <div><span class="meta-label">Status:</span> <span id="modalClipStatus">—</span></div>
+            <div id="modalYoutubeRow" hidden><span class="meta-label">YouTube:</span> <a id="modalYoutubeLink" target="_blank" rel="noopener noreferrer" class="link-yt">View on YouTube ↗</a></div>
+          </div>
+
+          <div class="modal-actions">
+            <button id="modalSaveMetaBtn" class="btn btn-secondary" type="button">Save Changes</button>
+            <button id="modalApproveBtn" class="btn btn-success" type="button">Approve</button>
+            <button id="modalUploadBtn" class="btn btn-primary" type="button">🚀 Upload to YouTube</button>
+          </div>
+        </div>
+      </div>
     </div>
-  </section>
+  </dialog>
 
-  <div class="bottom-grid"><section id="schedule" class="card" aria-labelledby="scheduleHeading"><div class="section-heading"><div><h2 id="scheduleHeading">Automatic schedule</h2><p id="scheduleCaption">Six automatic runs per day. Manual runs are unlimited.</p></div><span id="scheduleSaveState" class="badge neutral">Loading</span></div><div id="slots" class="slots"></div><form id="scheduleForm" class="card-body"><div class="field"><label for="scheduleTimezone">Schedule timezone</label><input id="scheduleTimezone" type="text" required list="timezones" placeholder="Asia/Kolkata"><datalist id="timezones"><option value="Asia/Kolkata"><option value="UTC"><option value="America/New_York"><option value="Europe/London"></datalist></div><div class="schedule-times"><div class="field"><label for="scheduleTime1">Run 1</label><input id="scheduleTime1" type="time" required></div><div class="field"><label for="scheduleTime2">Run 2</label><input id="scheduleTime2" type="time" required></div><div class="field"><label for="scheduleTime3">Run 3</label><input id="scheduleTime3" type="time" required></div><div class="field"><label for="scheduleTime4">Run 4</label><input id="scheduleTime4" type="time" required></div><div class="field"><label for="scheduleTime5">Run 5</label><input id="scheduleTime5" type="time" required></div><div class="field"><label for="scheduleTime6">Run 6</label><input id="scheduleTime6" type="time" required></div></div><p class="help">Times start generation; publishing follows when the video is ready. Up to 6 automatic attempts per local calendar day. Manual runs do not count toward this limit. Missed slots are skipped; keep AutoYT open and your machine awake.</p><p id="scheduleMessage" class="form-message" role="status"></p><div class="form-actions"><button id="resetSchedule" type="button" class="button quiet" disabled>Discard changes</button><button id="saveSchedule" type="submit" class="button primary" disabled>Save schedule</button></div></form></section><section class="card configuration" aria-labelledby="setupHeading"><div class="section-heading"><div><h2 id="setupHeading">Saved production setup</h2><p>The configuration used by new runs.</p></div></div><dl id="configuration"></dl></section></div>
-  <section id="morningScripts" class="card activity" hidden><div class="section-heading"><div><h2>Today's prepared scripts</h2><p id="planSummary">Reading the morning plan…</p></div></div><div id="planEntries" class="event-list"></div></section>
-  <section id="activity" class="card activity" aria-labelledby="activityHeading"><div class="section-heading"><div><h2 id="activityHeading">Recent activity</h2><p>Stage changes and messages from your runs.</p></div><small id="refreshed">Waiting for an update…</small></div><div id="events" class="event-list"></div></section>
-  <p id="writingWarning" class="quality-note"></p><footer><span>AutoYT · Your local control room</span><span>Updates every 5 seconds · Credentials stay on your machine</span></footer>
-</main>
-<dialog id="details" aria-labelledby="detailsHeading"><div class="dialog-heading"><h2 id="detailsHeading">Run details</h2><div class="actions"><button id="refreshDetails" class="button quiet" type="button">Refresh</button><button id="closeDetails" class="icon-button" aria-label="Close run details">×</button></div></div><div id="detailBody" aria-live="polite"></div></dialog>
-<dialog id="confirm" aria-labelledby="confirmTitle" aria-describedby="confirmText"><div class="dialog-heading"><h2 id="confirmTitle">Start a run?</h2><button id="closeConfirm" class="icon-button" aria-label="Close confirmation">×</button></div><p id="confirmText"></p><dl id="confirmSummary" class="confirm-summary"></dl><p id="confirmPendingNote" class="notice warning" role="status" hidden></p><div class="dialog-actions"><button id="cancelAction" class="button secondary" autofocus>Cancel</button><button id="confirmAction" class="button primary">Start run</button></div></dialog>
-</body></html>
+  <!-- RIGHTS AUTHORIZATION MODAL -->
+  <dialog id="authModal" class="modal modal-sm" aria-labelledby="authModalHeading">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="authModalHeading">Verify Content Rights</h3>
+        <button id="closeAuthModal" class="modal-close" type="button">×</button>
+      </div>
+      <form id="authForm" class="modal-body-form">
+        <input type="hidden" id="authEpisodeId" aria-label="Episode ID">
+        <p id="authEpisodeTitleDisplay" class="auth-episode-title"></p>
+        
+        <div class="input-group">
+          <label for="authBasisSelect">Legal Rights Basis</label>
+          <select id="authBasisSelect" required>
+            <option value="creator_permission" selected>Creator Permission / Written Consent</option>
+            <option value="cc_license">Creative Commons License</option>
+            <option value="public_domain">Public Domain</option>
+            <option value="fair_use_claimed">Fair Use / Commentary Claim</option>
+            <option value="other">Other Valid Legal Basis</option>
+          </select>
+        </div>
+
+        <div class="input-group">
+          <label for="authNotesInput">Verification Notes</label>
+          <input id="authNotesInput" type="text" placeholder="Permission confirmed via channel / creator consent...">
+        </div>
+
+        <p class="rights-notice">Downloads and clip rendering are strictly gated until authorized.</p>
+
+        <div class="modal-actions">
+          <button id="cancelAuthModalBtn" type="button" class="btn btn-secondary">Cancel</button>
+          <button id="blockEpBtn" type="button" class="btn btn-danger">Block Episode</button>
+          <button type="submit" class="btn btn-primary">Grant Authorization</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+</body>
+</html>

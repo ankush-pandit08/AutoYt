@@ -1,458 +1,764 @@
-let creativeImportBusy=false;
-import {TERMINAL,STAGES,MODE_NAMES,nice,jobStatus,filterJobs,runIntent,validateManual,confirmation,evidenceFor,mergeSnapshot,sameSelection,nextRunCountdown} from './ui.mjs';
+// AutoYT Clips Studio — Frontend Application Engine
 
-const $=id=>document.getElementById(id);
-const esc=value=>String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const formIds={script:['scriptModelForm','scriptModelMessage','scriptSaveState','saveScriptModel','resetScript'],render:['renderForm','renderMessage','renderSaveState','saveRender','resetRender'],voice:['voiceForm','voiceMessage','voiceSaveState','saveVoice','resetVoice']};
-formIds.schedule=['scheduleForm','scheduleMessage','scheduleSaveState','saveSchedule','resetSchedule'];
-const forms=Object.fromEntries(Object.keys(formIds).map(key=>[key,{initialized:false,dirty:false,saving:false,version:null,base:null}]));
-let youtubeAuthSubmitting=false;
-let state=null,token=null,connected=false,refreshPromise=null,requestPending=false,pending=null,pendingContext=null;
-let serverClockOffset=0;
-let jobsSignature='',toastTimer=null,detailId=null,detailRequest=0,detailJob=null;
-let voiceLoading=false,voicePage=null,voiceTestingId=null,voiceSubmitting=false,voiceProvider='';
-let voiceCatalogRequested=false,voiceCatalogLoaded=false;
-const draftVoices={};
-const time=value=>value ? new Date(value).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',timeZone:state?.settings.timezone || 'Asia/Kolkata'}) : '—';
-const date=value=>value ? new Date(value).toLocaleDateString('en-IN',{day:'numeric',month:'short',timeZone:state?.settings.timezone || 'Asia/Kolkata'}) : '—';
-const language=()=>state?.settings.language==='en' ? 'English' : state?.settings.script_style==='hinglish' ? 'Hinglish':'Hindi';
-const youtubeMode=()=>state?.settings.content_mode==='youtube_insights';
-const busy=()=>!!state?.busy || requestPending;
-const canAct=()=>connected && !!token && !!state;
-const badge=job=>{const status=jobStatus(typeof job==='string' ? {state:job}:job);return `<span class="badge ${status.tone}">${esc(status.label)}</span>`;};
-const link=(url,label)=>{try{if(new URL(url).protocol!=='https:') return esc(label);}catch{return esc(label);}return `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)} ↗</a>`;};
+const $ = id => document.getElementById(id);
+const esc = val => String(val ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-async function api(path,options={},timeoutMs=15000) {
-  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);
+let state = null;
+let token = null;
+let connected = false;
+let activeFilter = 'all';
+let currentModalClip = null;
+let toastTimer = null;
+
+// API communication
+async function api(path, options = {}, timeoutMs = 25000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response=await fetch(path,{...options,cache:'no-store',signal:controller.signal});
-    let data;try{data=await response.json();}catch{throw new Error('The server returned an unreadable response. Reconnect and try again.');}
-    if(!response.ok) throw new Error(data.error || `Request failed (${response.status}).`);
+    const res = await fetch(path, { ...options, cache: 'no-store', signal: controller.signal });
+    let data;
+    try { data = await res.json(); } catch { throw new Error('Unreadable response from local server.'); }
+    if (!res.ok) throw new Error(data.error || `Request failed (${res.status}).`);
     return data;
-  } catch(error) {
-    if(error.name==='AbortError') throw new Error(timeoutMs===25000?'Voice list timed out. Use Refresh voices to try again.':'Request timed out. Check the video library before starting another run.');
-    throw error;
-  } finally {clearTimeout(timer);}
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('Request timed out.');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
-const post=body=>api('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-AutoYT-Token':token},body:JSON.stringify(body)},body.action==='voice_list'?25000:15000);
-function message(key,text='',tone='') {const el=$(formIds[key][1]);el.textContent=text;el.dataset.tone=tone;}
-function toast(text,tone='success') {
-  clearTimeout(toastTimer);$('toastText').textContent=text;$('toast').dataset.tone=tone;$('toast').setAttribute('role',tone==='error'?'alert':'status');$('toast').hidden=false;
-  toastTimer=setTimeout(()=>$('toast').hidden=true,tone==='error'?10000:6500);
-}
-$('dismissToast').onclick=()=>{$('toast').hidden=true;clearTimeout(toastTimer);};
-$('reconnect').onclick=()=>refresh();
 
-function settingValue(key) {
-  if(key==='schedule') return {times:Array.from({length:6},(_,i)=>$('scheduleTime'+(i+1)).value),timezone:$('scheduleTimezone').value.trim()};
-  if(key==='script') return {provider:$('scriptProvider').value,...($('scriptProvider').value==='ollama'?{model:$('localScriptModel').value}:{})};
-  if(key==='render') return {render_mode:$('renderMode').value,render_fallback:$('renderFallback').checked,motion_icons:$('motionIcons').checked,motion_lottie:$('motionLottie').checked,sound_effects:$('soundEffects').checked};
-  return {provider:$('voiceProvider').value,language:$('scriptLanguage').value,
-    voice:$('voiceProvider').value==='elevenlabs' ? $('elevenVoice').value:$('localVoice').value.trim()};
-}
-function applySetting(key,value) {
-  if(key==='schedule') {value.times.forEach((time,i)=>$('scheduleTime'+(i+1)).value=time);$('scheduleTimezone').value=value.timezone;}
-  else if(key==='script') {$('scriptProvider').value=value.provider;$('localScriptModel').value=value.model || 'gemma3:4b';}
-  else if(key==='render') {$('renderMode').value=value.render_mode;$('renderFallback').checked=value.render_fallback;$('motionIcons').checked=value.motion_icons ?? true;$('motionLottie').checked=value.motion_lottie ?? true;$('soundEffects').checked=value.sound_effects ?? true;}
-  else {
-    Object.assign(draftVoices,state.voice_settings.voices);
-    $('voiceProvider').value=value.provider;$('scriptLanguage').value=value.language;$('localVoice').value=value.voice;voiceProvider=value.provider;
-    if(value.provider==='elevenlabs') ensureVoiceOption(value.voice);
-    showVoiceFields();
-  }
-}
-function syncForm(key,force=false) {
-  const form=forms[key],record=state[`${key}_settings`];
-  if(!record) return;
-  if(force || (!form.dirty && !form.saving && (!form.initialized || record.version!==form.version))) {
-    applySetting(key,record.selection);Object.assign(form,{initialized:true,dirty:false,version:record.version,base:structuredClone(record.selection)});
-  }
-  const conflict=form.dirty && record.version!==form.version;
-  const status=$(formIds[key][2]);
-  status.textContent=form.saving?'Saving…':conflict?'Changed elsewhere':form.dirty?'Unsaved changes':'Saved';
-  status.className=`badge ${conflict || form.dirty?'warning':form.saving?'working':'success'}`;
-  if(conflict && !form.saving) message(key,'Settings changed in another session. Discard your draft to load the latest saved settings, then edit again.','warning');
-}
-function dirty(key) {
-  const form=forms[key];form.dirty=!sameSelection(settingValue(key),form.base);
-  message(key);if(state) syncForm(key);updateControls();updateSummary();
-}
-function updateControls() {
-  const unavailable=!canAct();
-  renderYoutubeAuth();renderCreativeLibrary();
-  for(const id of ['run','preview','customRun','customPreview']) $(id).disabled=unavailable || busy();
-  $('toggle').disabled=unavailable || requestPending;
-  $('reconnect').disabled=!!refreshPromise;
-  $('refreshDetails').disabled=unavailable || !detailId;
-  for(const key of Object.keys(forms)) {
-    const form=forms[key],ids=formIds[key];
-    $(ids[3]).disabled=unavailable || !form.dirty || form.saving;
-    $(ids[3]).textContent=form.saving?'Saving…':{script:'Save script provider',render:'Save video style',voice:'Save voice settings',schedule:'Save schedule'}[key];
-    $(ids[4]).disabled=unavailable || !form.dirty || form.saving;
-    $(ids[0]).querySelectorAll('input,select').forEach(el=>el.disabled=unavailable || form.saving);
-    $(ids[0]).setAttribute('aria-busy',String(form.saving));
-  }
-  const voiceUnavailable=unavailable || busy() || forms.voice.saving || voiceLoading || voiceSubmitting || !!voiceTestingId;
-  $('testVoice').disabled=voiceUnavailable;
-  $('testVoice').textContent=voiceSubmitting || voiceTestingId ? 'Generating sample…':'Test voice';
-  const missingEleven=state && !state.voice_keys?.elevenlabs;
-  $('elevenVoice').disabled=unavailable || voiceLoading || forms.voice.saving || missingEleven;
-  $('loadVoices').disabled=$('moreVoices').disabled=unavailable || voiceLoading || forms.voice.saving || missingEleven;
-  const changed=pendingContext && state && (pendingContext.script!==state.script_settings.version || pendingContext.voice!==state.voice_settings.version || pendingContext.visibility!==state.settings.visibility || pendingContext.uploads!==state.settings.uploads_enabled || pendingContext.server!==state.started_at);
-  $('confirmAction').disabled=unavailable || busy() || !!changed;
-  $('confirmPendingNote').hidden=!(busy() || changed);
-  $('confirmPendingNote').textContent=changed?'Production settings changed. Cancel this confirmation and review the current settings before continuing.':busy()?'Another task is running. Wait for it to finish, or cancel this confirmation.':'';
-}
-async function saveSetting(key) {
-  if(!canAct() || forms[key].saving || !forms[key].dirty) return;
-  const form=forms[key],element=$(formIds[key][0]);if(!element.reportValidity()) return;
-  const selection=settingValue(key);form.saving=true;message(key,'Saving your settings…');syncForm(key);updateControls();
-  try {
-    const result=await post({action:{script:'save_script',render:'save_render',voice:'save_voice',schedule:'save_schedule'}[key],
-      ...(key==='voice'?{selection,version:form.version}:{manual_input:{selection,version:form.version}})});
-    const record=result[`${key}_settings`];state[`${key}_settings`]=record;
-    if(key==='schedule') applySetting(key,record.selection);
-    Object.assign(form,{version:record.version,base:structuredClone(record.selection),dirty:false});
-    message(key,result.message,'success');await refresh();
-  } catch(error) {message(key,error.message,'error');}
-  finally {form.saving=false;syncForm(key);updateControls();}
-}
-for(const key of Object.keys(forms)) {
-  $(formIds[key][0]).onsubmit=event=>{event.preventDefault();saveSetting(key);};
-  $(formIds[key][4]).onclick=()=>{if(key==='voice') clearVoiceSample();syncForm(key,true);message(key,'Draft discarded. Showing saved settings.');updateControls();updateSummary();updateScriptModelInfo();};
-}
-$('scheduleForm').oninput=()=>dirty('schedule');
-$('scriptProvider').onchange=$('localScriptModel').onchange=()=>{dirty('script');updateScriptModelInfo();};
-$('renderMode').onchange=$('renderFallback').onchange=$('motionIcons').onchange=$('motionLottie').onchange=$('soundEffects').onchange=()=>dirty('render');
-function updateScriptModelInfo() {
-  $('scriptFailoverNote').textContent=state?.settings.script_fallback_enabled
-    ? 'Voice selection is separate. Configured backups are tried automatically on quota or service failures. OpenRouter uses free models only.'
-    : 'Voice selection is separate. Automatic script-provider failover is disabled; only your selected provider is used.';
-  const info=state?.script_providers?.[$('scriptProvider').value];
-  $('localScriptModelRow').hidden=$('scriptProvider').value!=='ollama';
-  if(info?.local) {$('scriptModelInfo').textContent=`${$('localScriptModel').value} · Runs on this PC; no API key or cloud quota. CPU generation can take several minutes. Ollama and the selected model must be installed; checked when saving.`;return;}
-  $('scriptModelInfo').textContent=info?`${info.model}${info.free_only?' · Free-only; OpenRouter request limits apply':''} · ${info.key_present?'API key configured. Quota is checked when used.':'API key missing. Add it to the local environment before saving.'}`:'Choose Groq, Gemini, OpenRouter or Ollama local models.';
-}
-function updateSummary() {
-  if(!state) return;
-  const cfg=state.settings,provider=state.script_settings.selection.provider,override=$('runStyle').value;
-  const mode=override==='default'?state.render_settings.selection.render_mode:override;
-  $('summaryModel').textContent=`${nice(provider)} · ${cfg.model}`;
-  $('summaryVoice').textContent=`${language()} · ${cfg.voice}`;
-  $('summaryStyle').textContent=MODE_NAMES[mode] || 'Choose a style';
-  $('summaryUpload').textContent=cfg.uploads_enabled?`${nice(cfg.visibility)} upload after confirmation`:'Uploads disabled · local video only';
-  $('runStyle').options[0].textContent=`Use saved default · ${MODE_NAMES[state.render_settings.selection.render_mode]}`;
-}
-$('runStyle').onchange=updateSummary;
+const post = body => api('/api/action', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-AutoYT-Token': token
+  },
+  body: JSON.stringify(body)
+});
 
-function renderJobs() {
-  if(!state) return;
-  const jobs=filterJobs(state.jobs,$('filter').value,$('searchJobs').value),signature=JSON.stringify(jobs);
-  $('libraryCount').textContent=`${jobs.length} shown · ${state.jobs.length} recent runs${state.jobs.length===100?' (latest 100)':''}`;
-  if(signature===jobsSignature) return;jobsSignature=signature;
-  const focused=document.activeElement?.dataset?.job;
-  $('jobs').innerHTML=jobs.length?jobs.map(job=>{
-    const progress=['PUBLISHED','AWAITING_REVIEW','READY_TO_UPLOAD'].includes(job.state)?100:Math.min(100,job.progress);
-    const stage=STAGES[Math.min(job.stage,7)] || 'Preparing';
-    const note=job.state==='FAILED'?`Stopped · ${stage}`:job.state==='READY_TO_UPLOAD'?'Complete':job.state==='SKIPPED'?'No video created':`${progress}%`;
-    return `<tr><td><div class="video-cell">${job.has_cover?`<img class="video-thumb" loading="lazy" src="/media/${job.id}/cover.png" alt="">`:'<span class="video-thumb video-placeholder" aria-hidden="true">▶</span>'}<div><div class="video-title">${esc(job.title)}</div><div class="video-id">${esc(job.id)}${job.dry_run?' · Preview only':''}</div></div></div></td><td>${badge(job)}</td><td><progress max="100" value="${progress}" aria-label="${esc(note)}">${progress}%</progress><div class="progress-label">${esc(note)}</div></td><td class="date">${esc(date(job.created_at))}<br>${esc(time(job.created_at))}</td><td><button class="text-button" data-job="${job.id}" aria-label="View details: ${esc(job.title)}">View →</button></td></tr>`;
-  }).join(''):`<tr><td colspan="5" class="empty"><strong>${state.jobs.length?'No matching videos':'Your first video starts here'}</strong>${state.jobs.length?'Try a different status or search.':'Create a preview to try your production settings.'}<br>${state.jobs.length?'<button class="button secondary" id="clearSearch">Clear filters</button>':'<a class="button secondary" href="#create">Create a preview</a>'}</td></tr>`;
-  if(focused) $('jobs').querySelector(`[data-job="${focused}"]`)?.focus({preventScroll:true});
+// Toast notification
+function toast(text, tone = 'success') {
+  clearTimeout(toastTimer);
+  const t = $('toast');
+  const txt = $('toastText');
+  const ic = $('toastIcon');
+  txt.textContent = text;
+  ic.textContent = tone === 'error' ? '❌' : tone === 'info' ? 'ℹ️' : '✅';
+  t.dataset.tone = tone;
+  t.hidden = false;
+  t.style.display = 'flex';
+  toastTimer = setTimeout(() => {
+    t.hidden = true;
+    t.style.display = 'none';
+  }, tone === 'error' ? 9000 : 5000);
 }
-function render() {
-  if(!state) return;
-  const s=state,cfg=s.settings;
-  for(const key of Object.keys(forms)) syncForm(key);
-  updateScriptModelInfo();showVoiceFields();renderVoiceResult();updateSummary();
-  $('connection').textContent='Connected to localhost';$('connection').dataset.state='online';$('offline').hidden=true;
-  $('autoBadge').textContent=s.auto_enabled?'ON':'PAUSED';$('autoBadge').className=`badge ${s.auto_enabled?'success':'neutral'}`;
-  $('autoDescription').textContent=`${cfg.slots.length} slots per day · Up to ${s.daily.limit} automatic attempts · ${cfg.uploads_enabled?cfg.visibility+' uploads':'uploads disabled'}`;
-  $('toggle').textContent=s.auto_enabled?'Pause automatic runs':'Resume automatic runs';
-  $('run').textContent=cfg.uploads_enabled?cfg.visibility==='public'?'Find topic & publish':'Find topic & upload privately':'Find topic & create';
-  $('customRun').textContent=cfg.uploads_enabled?cfg.visibility==='public'?'Create & publish':'Create & upload privately':'Create video';
-  $('automaticNote').textContent=`Uses saved ${MODE_NAMES[s.render_settings.selection.render_mode]} style and ${nice(s.script_settings.selection.provider)}${s.settings.script_fallback_enabled?' with automatic script backups':''}. Previews stay local.`;
-  $('customUploadNote').textContent=cfg.uploads_enabled?`Create publishes ${cfg.visibility==='public'?'publicly':'privately'} after confirmation. Preview never uploads.`:'Both actions create local videos. Uploads are disabled.';
-  $('uploaded').textContent=s.daily.uploaded;$('attempts').textContent=s.daily.attempts;$('failed').textContent=s.daily.failed;
-  $('target').textContent=`${s.daily.auto_attempts ?? 0} / ${s.daily.limit} automatic attempts · manual unlimited`;
-  $('next').textContent=s.next_run?time(s.next_run):s.auto_enabled?'No upcoming slot':'Paused';
-  updateCountdown();
-  $('timezone').textContent=s.next_run?`${date(s.next_run)} · ${cfg.timezone}`:cfg.timezone;
-  const focus=s.jobs.find(job=>!TERMINAL.has(job.state)),testing=s.voice_preview?.state==='GENERATING';
-  $('liveTitle').textContent=s.busy?(focus?.title || (testing?'Generating your voice sample':'Preparing a new run…')):'Ready when you are';
-  $('liveBadge').textContent=s.busy?(testing && !focus?'VOICE TEST':'IN PROGRESS'):'IDLE';$('liveBadge').className=`badge ${s.busy?'working':'neutral'}`;
-  const stages=youtubeMode()?['Find topic','Research sources','Write script',...STAGES.slice(3)]:STAGES;
-  $('pipeline').innerHTML=stages.map((label,index)=>`<li class="step ${s.busy&&focus?(index<focus.stage?'done':index===focus.stage?'current':''):''}" ${s.busy&&focus&&index===focus.stage?'aria-current="step"':''}><i aria-hidden="true">${s.busy&&focus&&index<focus.stage?'✓':index+1}</i><span>${esc(label)}</span></li>`).join('');
-  const researchProgress=s.busy && focus?.state==='RESEARCHING' ? focus.research_progress:null;
-  const elapsed=researchProgress?Math.max(0,Math.floor((new Date(s.now)-new Date(researchProgress.started_at))/1000)):0;
-  $('liveNote').textContent=researchProgress?`${researchProgress.message} · ${elapsed}s elapsed · ${researchProgress.limit_seconds}s research budget`:s.notice || 'Generated scripts use retrieved evidence. User-supplied narration stays unchanged; media and license checks still apply.';
-  $('disk').textContent=`${s.disk_free_gb} GB available`;
-  $('scheduleCaption').textContent=`${cfg.slots.length} daily slots · ${cfg.timezone}${cfg.daily_script_batch?' · Scripts prepared at '+cfg.morning_plan_time:''}`;
-  const nextSlot=s.next_run?new Date(s.next_run).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',timeZone:cfg.timezone}):null;
-  $('slots').innerHTML=cfg.slots.map(slot=>`<span class="slot ${slot===nextSlot?'next':''}">${esc(slot)}${slot===nextSlot?'<small>Next</small>':''}</span>`).join('');
-  const config=[['Topic discovery',youtubeMode()?'YouTube inspiration + web research':'RSS / Trends + source checks'],['Script model',`${nice(s.script_settings.selection.provider)} · ${cfg.model}`],['Narration',`${language()} · ${cfg.voice}`],['Video style',MODE_NAMES[s.render_settings.selection.render_mode]],['Topic focus',cfg.topic_focus==='ai_coding'?'AI, LLMs & coding':'Technology insights'],['Visuals',[cfg.public_images?'Wikimedia Commons':'',cfg.pixabay?'Pixabay':'',cfg.pexels?'Pexels':'','Original graphics'].filter(Boolean).join(' · ')],['Google authorization',s.youtube_authorization?.state==='reconnect_required'?'Reconnect required · see YouTube connection':s.youtube_authorization?.state==='connected'?'Channel verified':cfg.token_present?'Token saved · validity checked on use':'Setup required'],['Publishing',cfg.uploads_enabled?`${nice(cfg.visibility)} uploads`:'Disabled']];
-  $('configuration').innerHTML=config.map(([key,value])=>`<dt>${esc(key)}</dt><dd>${esc(value)}</dd>`).join('');
-  $('renderAvailability').textContent=s.motion_renderer.ready?'Local motion renderer ready. Hybrid keeps available B-roll.':'Motion renderer needs setup. Normal works without it; enabled fallback is recorded per run.';
-  $('events').innerHTML=s.events.length?s.events.map(event=>`<div class="event"><time>${esc(date(event.created_at))}<br>${esc(time(event.created_at))}</time><div><p>${badge(event.state)} ${esc(event.message)}</p><small>${esc(event.job_id)}</small></div></div>`).join(''):'<p class="help">Run updates will appear here.</p>';
-  $('morningScripts').hidden=!cfg.daily_script_batch;
-  const plan=s.daily_plan;
-  $('planSummary').textContent=plan?`${plan.entries.length}/${cfg.slots.length} prepared · ${nice(plan.state)} · ${plan.date}`:`Next preparation: ${cfg.morning_plan_time} · ${cfg.timezone}`;
-  $('planEntries').innerHTML=plan?.entries.length?plan.entries.map(entry=>`<details class="event"><summary>${esc(entry.slot)} · ${esc(entry.title)}</summary><p>${esc(entry.script)}</p></details>`).join(''):'<p class="help">No prepared scripts for today. Scheduled slots use their saved morning plan.</p>';
-  if(plan?.error) $('planEntries').innerHTML+=`<p class="error-text">${esc(plan.error)}</p>`;
-  if(plan?.rejected?.length) $('planEntries').innerHTML+=`<details><summary>${plan.rejected.length} topics did not qualify</summary><ul>${plan.rejected.map(item=>`<li>${esc(item.topic)} — ${esc(item.reason)}</li>`).join('')}</ul></details>`;
-  $('refreshed').textContent=`Updated ${time(s.now)}`;$('writingWarning').textContent=s.writing_warning;
-  updateCustomInput();renderJobs();updateControls();
+
+function dismissToast() {
+  clearTimeout(toastTimer);
+  const t = $('toast');
+  if (t) {
+    t.hidden = true;
+    t.style.display = 'none';
+  }
 }
+
+$('dismissToast').addEventListener('click', (e) => {
+  e.stopPropagation();
+  dismissToast();
+});
+
+// Formatting helpers
+function formatDuration(sec) {
+  if (!sec) return '0s';
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+// Data synchronization & refresh
 async function refresh() {
-  if(refreshPromise) return refreshPromise;
-  refreshPromise=(async()=>{
-    try {
-      const next=await api('/api/status');
-      if(!token || (state && next.started_at!==state.started_at)) token=(await api('/api/session')).token;
-      state=mergeSnapshot(state,next);serverClockOffset=Date.parse(next.now)-Date.now();connected=true;render();
-    } catch {
-      connected=false;$('connection').textContent='Disconnected';$('connection').dataset.state='offline';$('offline').hidden=false;
-    } finally {refreshPromise=null;updateControls();}
-  })();
-  updateControls();return refreshPromise;
-}
-
-function openConfirmation(intent) {
-  if(!canAct() || busy()) return toast('Wait for the current task to finish and check your connection.','error');
-  if($('confirm').open) return;
-  pending=structuredClone(intent);
-  pendingContext={script:state.script_settings.version,voice:state.voice_settings.version,visibility:state.settings.visibility,uploads:state.settings.uploads_enabled,server:state.started_at};
-  const copy=confirmation(pending,state.settings);
-  $('confirmTitle').textContent=copy.title;$('confirmText').textContent=copy.text;$('confirmText').dataset.public=String(copy.isPublic);$('confirmAction').textContent=copy.button;
-  const rows=intent.action==='retry'?[['Run',intent.job_id],['Settings','Original saved selection']]:[
-    ['Input',intent.manual_input?intent.manual_input.mode==='script'?'Your narration':'Your topic':'Automatic topic'],
-    ['Script',nice(state.script_settings.selection.provider)],['Voice',`${language()} · ${state.settings.voice}`],['Style',MODE_NAMES[intent.render_mode]],['Output',intent.action==='preview'?'Local preview only':state.settings.uploads_enabled?nice(state.settings.visibility)+' upload':'Local video only']];
-  $('confirmSummary').innerHTML=rows.map(([key,value])=>`<dt>${esc(key)}</dt><dd>${esc(value)}</dd>`).join('');
-  $('confirm').showModal();updateControls();
-}
-function automatic(preview) {
-  if(!state) return;
-  openConfirmation(runIntent({kind:'automatic',preview,savedMode:state.render_settings.selection.render_mode}));
-}
-function updateCustomInput() {
-  const script=$('customMode').value==='script',content=$('customContent');
-  $('customTopicRow').hidden=!script;$('customTopic').required=script;$('customScriptFormat').hidden=!script;
-  content.maxLength=script?5000:180;content.rows=script?6:4;
-  $('customLabel').textContent=script?'Your narration':'What should this video explain?';
-  $('customHelp').textContent=script?`12–180 words. ${language()} is the saved narration language. Your words won't be rewritten.`:`Researches this topic and writes an original ${language()} script using retrieved sources.`;
-  $('customCount').textContent=script?`${content.value.trim().split(/\s+/).filter(Boolean).length} words · 12–180 allowed`:`${content.value.length} / 180 characters`;
-  $('customSourceLabel').textContent=youtubeMode()?'YouTube topic references':'Official documentation and independent coverage';
-  $('customSourceHelp').textContent=youtubeMode()?script?'Source links are optional; supplied narration is not independently checked.':'Up to six YouTube video links, one per line. Web research establishes the script facts.':'Up to six HTTPS source links, one per line.';
-}
-function clearCustomError() {$('customError').hidden=true;$('customContent').removeAttribute('aria-invalid');}
-function customRun(preview) {
-  if(!canAct() || busy()) return;
-  clearCustomError();if(!$('customForm').reportValidity()) return;
-  const manualInput={mode:$('customMode').value,content:$('customContent').value.trim(),topic:$('customTopic').value.trim(),source_urls:$('customSources').value.split(/\n/).map(v=>v.trim()).filter(Boolean)};
-  const error=validateManual(manualInput);
-  if(error) {$('customError').textContent=error;$('customError').hidden=false;$('customContent').setAttribute('aria-invalid','true');$('customContent').focus();return;}
-  openConfirmation(runIntent({kind:'manual',preview,manualInput,modeOverride:$('runStyle').value,savedMode:state.render_settings.selection.render_mode}));
-}
-async function performAction(intent) {
-  if(!canAct() || requestPending) return;
-  requestPending=true;updateControls();
-  try {const result=await post(intent);toast(result.message);await refresh();}
-  catch(error) {toast(error.message,'error');}
-  finally {requestPending=false;updateControls();}
-}
-$('preview').onclick=()=>automatic(true);$('run').onclick=()=>automatic(false);
-$('customForm').onsubmit=event=>{event.preventDefault();customRun(false);};$('customPreview').onclick=()=>customRun(true);
-$('customMode').onchange=()=>{clearCustomError();updateCustomInput();};$('customContent').oninput=()=>{clearCustomError();updateCustomInput();};
-$('customTopic').oninput=$('customSources').oninput=clearCustomError;
-$('toggle').onclick=()=>{if(state) performAction({action:state.auto_enabled?'pause':'resume'});};
-$('closeConfirm').onclick=$('cancelAction').onclick=()=>$('confirm').close();
-$('confirm').addEventListener('close',()=>{pending=null;pendingContext=null;});
-$('confirmAction').onclick=()=>{const task=pending;if(!task) return;$('confirm').close();pending=null;performAction(task);};
-$('filter').onchange=$('searchJobs').oninput=renderJobs;
-$('jobs').onclick=event=>{const button=event.target.closest('[data-job]');if(button) details(button.dataset.job);if(event.target.closest('#clearSearch')){$('searchJobs').value='';$('filter').value='all';renderJobs();$('searchJobs').focus();}};
-
-function scriptUsage(data) {
-  const voice=data.voice_provider_usage;
-  const voiceNotice=voice?`<div class="detail-section"><h3>Voice provider used</h3><p>${esc(nice(voice.active_provider))} · ${esc(voice.active_voice)}</p><p class="detail-source-note">Automatic local English male voice backup. ${esc(voice.reason)}</p></div>`:'';
-  const calls=data.script_provider_usage?.calls || [];
-  const used=[...new Set(calls.filter(c=>c.status==='success').map(c=>`${nice(c.provider)} · ${c.model}`))];
-  const unavailable=[...new Set(calls.filter(c=>c.status==='unavailable').map(c=>nice(c.provider)))];
-  if(!calls.length) return voiceNotice;
-  return `<div class="detail-section"><h3>Script providers used</h3><p>${used.length?used.map(esc).join('<br>'):'Waiting for an available provider.'}</p>${unavailable.length?`<p class="detail-source-note">Automatic backup after ${esc(unavailable.join(', '))} became unavailable.</p>`:''}</div>${voiceNotice}`;
-}
-
-async function details(id) {
-  detailId=id;detailJob=state?.jobs.find(job=>job.id===id) || detailJob;
-  const request=++detailRequest;
-  $('detailBody').innerHTML='<p class="help" role="status">Loading saved run details…</p>';
-  if(!$('details').open) $('details').showModal();
-  $('details').setAttribute('aria-busy','true');updateControls();
   try {
-    const data=await api(`/api/jobs/${id}`);
-    if(request!==detailRequest || detailId!==id || !$('details').open) return;
-    const evidence=evidenceFor(data),assets=[...(data.media_assets || []),...(data.render_report?.creative_assets || [])],report=data.render_report;
-    const unchecked=data.script?.source_basis==='user_input' || data.source_brief?.basis==='user_input';
-    const sourceNote=unchecked?'Your supplied narration is not independently fact checked.':evidence.status==='official_source_only'?'Official company claims are attributed; independent corroboration was not established.':evidence.sources.length?'These retrieved sources support the script. Topic references are listed separately.':'No completed evidence record is available yet.';
-    $('detailBody').innerHTML=`<p class="detail-title">${esc(data.script?.title || data.topic || 'Preparing a technology story')}</p><div class="detail-status">${badge(data)}<span class="detail-code">${esc(id)}${data.dry_run?' · Local preview only':''}</span></div>${data.error?`<p class="error-text">${esc(data.error)}</p>`:''}${detailJob?.has_video?`<video class="detail-video" controls preload="metadata" src="/media/${id}/final.mp4" aria-label="Saved video preview"></video>`:''}<div class="detail-links">${data.youtube?.url?link(data.youtube.url,'Open uploaded video on YouTube'):''}${data.state==='FAILED'?`<button class="button secondary" data-retry="${id}" ${busy() || !canAct()?'disabled':''}>Retry saved checkpoint</button>`:''}</div><div class="detail-section"><h3>Production settings</h3><p>Requested style: ${esc(MODE_NAMES[data.render_settings?.render_mode || 'normal'])}<br>Rendered style: ${report?.status==='completed'?esc(MODE_NAMES[report.effective_mode]):'Not completed yet'}${data.script_settings?`<br>Preferred script model: ${esc(nice(data.script_settings.provider))} · ${esc(data.script_settings.model)}`:''}</p>${report?.fallback_reason?`<p class="notice warning">${esc(report.fallback_reason)}</p>`:''}</div>${scriptUsage(data)}<div class="detail-section"><h3>Narration</h3><p>${esc(data.script?.script || 'The script has not completed yet.')}</p></div><div class="detail-section"><h3>Evidence sources</h3><p class="detail-source-note">${esc(sourceNote)}</p><ul>${evidence.sources.map(source=>`<li>${link(source.url,source.title || source.publisher || 'Source')}${source.primary?' · Official source':''}</li>`).join('')}</ul></div>${evidence.inspiration.length?`<div class="detail-section"><h3>Topic inspiration</h3><p class="detail-source-note">Creator video metadata suggests the topic; it is separate from web evidence.</p><ul>${evidence.inspiration.map(source=>`<li>${link(source.url,source.title || 'Topic reference')}</li>`).join('')}</ul></div>`:''}${data.research_attempts?.length?`<details class="detail-section"><summary>Other topics checked (${data.research_attempts.length})</summary><ul>${data.research_attempts.map(item=>`<li>${esc(item.topic)}<br>${esc(item.reason)}</li>`).join('')}</ul></details>`:''}<details class="detail-section"><summary>Visual credits & licenses</summary><p>${data.media_license_audit?.passed?'Recorded license checks passed.':'License checks have not completed.'} Provider restrictions and third-party rights still apply.</p><ul>${assets.length?assets.map(asset=>`<li>${esc(asset.attribution || asset.provider || 'Original graphics')}<br>${esc(asset.license)} ${asset.source_url?link(asset.source_url,'Source'):''}</li>`).join(''):'<li>No visuals have been selected.</li>'}</ul></details><div class="detail-section"><h3>Media quality</h3><p>${data.validation?.passed?'Passed automated dimensions, codec, duration, audio and caption checks.':'No completed media validation.'}</p><p class="detail-source-note">Caption phrases use estimated timing within measured narration scenes.</p></div>`;
-  } catch(error) {
-    if(request===detailRequest && $('details').open) $('detailBody').innerHTML=`<p class="error-text">${esc(error.message)}</p><p class="help">Use Refresh to load these run details again.</p>`;
-  } finally {if(request===detailRequest) $('details').removeAttribute('aria-busy');}
-}
-$('closeDetails').onclick=()=>$('details').close();
-$('refreshDetails').onclick=()=>{if(detailId) details(detailId);};
-$('details').addEventListener('close',()=>{$('details').querySelector('video')?.pause();detailId=null;detailRequest++;});
-$('detailBody').onclick=event=>{const button=event.target.closest('[data-retry]');if(button){const id=button.dataset.retry;$('details').close();openConfirmation({action:'retry',job_id:id});}};
-
-function ensureVoiceOption(value) {
-  if(value && ![...$('elevenVoice').options].some(option=>option.value===value)) $('elevenVoice').add(new Option('Saved voice',value));
-  $('elevenVoice').value=value || '';
-}
-function showVoiceFields() {
-  const provider=$('voiceProvider').value,eleven=provider==='elevenlabs';
-  $('elevenVoiceRow').hidden=!eleven;$('localVoiceRow').hidden=eleven;$('elevenNotice').hidden=!eleven;
-  $('localVoice').required=!eleven;$('elevenVoice').required=eleven;
-  const missingEleven=!state?.voice_keys?.elevenlabs;
-  $('elevenVoice').disabled=!canAct() || missingEleven || voiceLoading || forms.voice.saving;
-  $('loadVoices').textContent=voiceLoading?'Loading voices…':voiceCatalogRequested?'Refresh voices':'Load voices';
-  $('elevenVoiceHelp').textContent=missingEleven?'ElevenLabs API key is missing. Add ELEVENLABS_API_KEY to D:\\AutoYt\\.env, then restart AutoYT.':voiceLoading?'Loading voices from your ElevenLabs account…':voiceCatalogLoaded?'Choose an available voice. Indian-accented male voices are listed first.':'Voices load from your ElevenLabs account. If loading fails, use Refresh voices to retry.';
-  if(eleven && !missingEleven && canAct() && !voiceCatalogRequested) loadVoiceList();
-  const hints={kokoro:'Local model. English male voice: am_michael. Hindi/Hinglish requires a Hindi voice such as hm_omega.',gemini:'API voice, for example Puck. Tests and narration use your Gemini quota.',piper:'Uses the configured local Piper voice model.',sapi:'Uses an installed Windows voice. Language support depends on the installed voices.',indicf5:'Uses the configured local model and reference voice.'};
-  $('voiceProviderHelp').textContent=hints[provider] || 'Choose a voice provider.';
-  const apiVoice=['gemini','elevenlabs'].includes(provider),missing=apiVoice && !state?.voice_keys?.[provider];
-  $('voiceTestHelp').textContent=missing?`${nice(provider)} API key is missing. Add it to the local environment before testing.`:apiVoice?'Tests use a short sample and consume provider quota. Testing does not save settings.':'Generates a short local sample without voice API credits. Testing does not save settings.';
-  $('localVoice').setCustomValidity(provider==='kokoro' && $('scriptLanguage').value!=='en' && !$('localVoice').value.startsWith('h')?'Hindi or Hinglish needs a Hindi Kokoro voice such as hm_omega.':'');
-}
-function clearVoiceSample() {
-  if(voiceTestingId || !$('voiceAudio').hidden) {
-    voiceTestingId=null;$('voiceAudio').pause();$('voiceAudio').removeAttribute('src');$('voiceAudio').hidden=true;
+    if (!token) {
+      const session = await api('/api/session');
+      token = session.token;
+    }
+    state = await api('/api/status');
+    connected = true;
+    $('connDot').className = 'status-dot online';
+    $('connText').textContent = 'Connected';
+    renderDashboard();
+  } catch (err) {
+    connected = false;
+    $('connDot').className = 'status-dot';
+    $('connText').textContent = 'Disconnected';
+    console.error('Refresh error:', err);
   }
 }
-function voiceChanged(providerChanged=false) {
-  clearVoiceSample();
-  if(providerChanged) {
-    if(voiceProvider && voiceProvider!=='elevenlabs') draftVoices[voiceProvider]=$('localVoice').value;
-    voiceProvider=$('voiceProvider').value;
-    if(voiceProvider!=='elevenlabs') $('localVoice').value=draftVoices[voiceProvider] || state?.voice_settings.voices[voiceProvider] || (voiceProvider==='gemini'?'Puck':voiceProvider==='kokoro'?'am_michael':'default');
-    else ensureVoiceOption(state?.voice_settings.voices.elevenlabs || '');
-  }
-  showVoiceFields();dirty('voice');
-}
-$('voiceProvider').onchange=()=>voiceChanged(true);
-$('scriptLanguage').onchange=$('elevenVoice').onchange=()=>voiceChanged();
-$('localVoice').oninput=()=>voiceChanged();
-async function loadVoiceList(more=false) {
-  if(!canAct() || voiceLoading || !state.voice_keys.elevenlabs) return;
-  voiceCatalogRequested=true;voiceLoading=true;message('voice','Loading available voices…');updateControls();showVoiceFields();
-  try {
-    const result=await post({action:'voice_list',page:more?voicePage:null}),selected=$('elevenVoice').value;
-    const existing=more?[...$('elevenVoice').options].filter(option=>option.value).map(option=>({id:option.value,name:option.text})):[];
-    const voices=new Map([...existing,...result.voices].map(voice=>[voice.id,voice]));
-    $('elevenVoice').innerHTML='<option value="">Choose a voice</option>'+[...voices.values()].map(voice=>`<option value="${esc(voice.id)}">${esc(voice.name)}${voice.labels?' · '+esc([voice.labels.accent,voice.labels.gender,voice.labels.language].filter(Boolean).join(' / ')):''}${voice.recommended?' (Indian male)':''}</option>`).join('');
-    ensureVoiceOption(selected);voicePage=result.next_page;$('moreVoices').hidden=!voicePage;
-    voiceCatalogLoaded=true;
-    message('voice',voices.size?'Voices loaded. Choose one, then test it before saving.':'No voices found. Check your ElevenLabs voice library.');
-  } catch(error) {message('voice',error.message,'error');}
-  finally {voiceLoading=false;updateControls();showVoiceFields();}
-}
-$('loadVoices').onclick=()=>loadVoiceList();$('moreVoices').onclick=()=>loadVoiceList(true);
-$('testVoice').onclick=async()=>{
-  if(!canAct() || busy() || voiceSubmitting || voiceTestingId || !$('voiceForm').reportValidity()) return;
-  clearVoiceSample();voiceSubmitting=true;message('voice','Generating a short sample. Local models may take a few minutes.');updateControls();
-  try {
-    const result=await post({action:'test_voice',selection:settingValue('voice')});voiceTestingId=result.preview_id;
-    message('voice','Voice sample is generating. You can keep browsing this dashboard.');await refresh();
-  } catch(error) {message('voice',error.message,'error');}
-  finally {voiceSubmitting=false;updateControls();}
-};
-function renderVoiceResult() {
-  const result=state.voice_preview;
-  if(!voiceTestingId || result?.id!==voiceTestingId) return;
-  if(result.state==='READY') {
-    $('voiceAudio').src=`/api/voice-preview/${result.id}.wav`;$('voiceAudio').hidden=false;voiceTestingId=null;
-    message('voice','Sample ready. Listen before saving. The sample expires after 9 minutes.','success');
-  } else if(result.state==='FAILED') {voiceTestingId=null;message('voice',result.error,'error');}
-}
-$('voiceAudio').onerror=()=>{if(!$('voiceAudio').hidden) message('voice','This sample could not be played or has expired. Generate a new voice test.','error');};
 
-function updateNavigation() {
-  const target=location.hash || '#overview';
-  document.querySelectorAll('.sidebar nav a').forEach(anchor=>{
-    if(anchor.getAttribute('href')===target) anchor.setAttribute('aria-current','location');else anchor.removeAttribute('aria-current');
+// Master Render Function
+function renderDashboard() {
+  const p = state?.podcast || {};
+  const stats = p.stats || {};
+  const episodes = p.episodes || [];
+  const clips = p.clips || [];
+  const sources = p.sources || [];
+
+  // 1. Top Metrics
+  $('statDiscovered').textContent = stats.episodes_discovered ?? episodes.length;
+  $('statAuthorized').textContent = stats.episodes_authorized ?? 0;
+  $('statGenerated').textContent = stats.clips_generated ?? clips.filter(c => c.output_path).length;
+  const awaitingCount = clips.filter(c => c.status === 'candidate').length;
+  $('statAwaiting').textContent = awaitingCount;
+  $('badgeQueueCount').textContent = awaitingCount;
+  $('statUploaded').textContent = stats.videos_uploaded ?? clips.filter(c => c.status === 'uploaded').length;
+
+  // 2. Filter Tab Badges
+  $('countAll').textContent = clips.length;
+  $('countCandidate').textContent = awaitingCount;
+  $('countApproved').textContent = clips.filter(c => c.status === 'approved').length;
+  $('countUploaded').textContent = clips.filter(c => c.status === 'uploaded').length;
+
+  // 3. Render Clips Studio Gallery
+  renderClipsGallery(clips);
+
+  // 4. Render Discovered Episodes Feed
+  renderEpisodesTable(episodes);
+
+  // 5. Render Creators Sources & YouTube Connection
+  renderSources(sources);
+  renderYouTubeStatus();
+
+  // 6. Render Daily 5-Shorts Automation Schedule
+  renderAutomationSchedule(state?.podcast?.schedule);
+}
+
+// Render Clips Grid
+function renderClipsGallery(clips) {
+  const container = $('clipsGrid');
+  const filtered = clips.filter(c => {
+    if (activeFilter === 'all') return true;
+    return c.status === activeFilter;
   });
-}
-window.addEventListener('hashchange',updateNavigation);updateNavigation();
-function updateCountdown() {
-  if(state) $('nextCountdown').textContent=nextRunCountdown(state.next_run,Date.now()+serverClockOffset,state.auto_enabled);
-}
-async function boot() {
-  $('connection').dataset.state='loading';updateControls();
-  await refresh();
-  setInterval(()=>{if(!document.hidden) refresh();},5000);
-  setInterval(updateCountdown,1000);
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden) refresh();});
-}
-boot();
 
-function renderYoutubeAuth() {
-  const auth=state?.youtube_authorization;
-  if(!auth) {$('youtubeAuthMessage').textContent='Reconnect to load YouTube authorization status.';return;}
-  const labels={connected:'Connected',unverified:'Saved · not checked',missing:'Not connected',reconnect_required:'Reconnect required',waiting:'Waiting for Google',verifying:'Verifying channel',failed:'Connection failed',expired:'Request expired',cancelled:'Cancelled'};
-  const pending=['waiting','verifying'].includes(auth.state);
-  $('youtubeAuthState').textContent=labels[auth.state] || 'Check connection';
-  $('youtubeAuthState').className=`badge ${auth.state==='connected'?'success':pending?'working':['reconnect_required','failed','expired','missing'].includes(auth.state)?'warning':'neutral'}`;
-  $('youtubeAuthMessage').textContent=auth.message || (auth.state==='reconnect_required'?'Google rejected the saved permission. Reconnect, then retry the saved video.':auth.state==='connected'?'Your configured YouTube channel was verified.':auth.state==='missing'?'Connect the configured YouTube channel before uploading.':'Authorization is saved; validity is checked when YouTube is used.');
-  if(!auth.client_present) $('youtubeAuthMessage').textContent='Google OAuth client JSON is missing. Add the configured client file before reconnecting.';
-  else if(!auth.channel_pinned) $('youtubeAuthMessage').textContent='Complete initial channel setup and configure YOUTUBE_CHANNEL_ID before using this reconnect button.';
-  $('reconnectYoutube').disabled=!canAct() || busy() || youtubeAuthSubmitting || pending || !auth.client_present || !auth.channel_pinned;
-  $('cancelYoutubeAuth').hidden=auth.state!=='waiting';
-  $('cancelYoutubeAuth').disabled=!canAct() || youtubeAuthSubmitting;
-  if(!pending) {$('youtubeAuthLink').hidden=true;$('youtubeAuthLink').removeAttribute('href');}
+  if (!filtered.length) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <span class="empty-icon">🎬</span>
+        <h3>No clips in this view</h3>
+        <p>Paste a YouTube podcast link above or run "Auto-Clip Top Episode" to create high-impact Shorts.</p>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = filtered.map(clip => {
+    const hasVideo = !!clip.output_path;
+    const isUploaded = clip.status === 'uploaded';
+    const isApproved = clip.status === 'approved';
+    const isCandidate = clip.status === 'candidate';
+    const ytUrl = clip.youtube_url || (clip.youtube_video_id ? `https://www.youtube.com/shorts/${clip.youtube_video_id}` : null);
+    const score = clip.ai_score ? Math.round(clip.ai_score) : 75;
+    const dur = formatDuration(clip.duration_seconds);
+
+    return `
+      <div class="clip-card" data-clip-id="${esc(clip.id)}">
+        <div class="clip-media-box" data-id="${esc(clip.id)}" title="Click to preview video in Cinema player">
+          <img src="/media/podcast/clip/${esc(clip.id)}/thumbnail.png" alt="Short preview" class="clip-poster" loading="lazy">
+          <div class="play-overlay">
+            <div class="play-circle">▶</div>
+            <span class="play-caption">Play Preview</span>
+          </div>
+          <span class="clip-score-badge">★ ${score}</span>
+          <span class="clip-duration-badge">⏱ ${dur}</span>
+          <div class="clip-status-banner">
+            <span class="badge badge-${esc(clip.status || 'candidate')}">${esc(clip.status || 'candidate')}</span>
+          </div>
+        </div>
+
+        <div class="clip-info">
+          <span class="clip-creator">🎙️ ${esc(clip.source_id || 'Podcast')} • Clip #${esc(clip.clip_index || 1)}</span>
+          <h4 class="clip-title" title="${esc(clip.generated_title || 'Untitled Short')}">
+            ${esc(clip.generated_title || 'Untitled Short')}
+          </h4>
+
+          <div class="clip-actions">
+            ${isUploaded ? `
+              <a href="${esc(ytUrl)}" target="_blank" rel="noopener noreferrer" class="clip-yt-link">
+                ▶ View on YouTube Shorts ↗
+              </a>
+            ` : `
+              <button class="btn btn-secondary btn-sm edit-clip-btn" data-id="${esc(clip.id)}">✨ Preview</button>
+              ${isCandidate ? `
+                <button class="btn btn-success btn-sm approve-clip-btn" data-id="${esc(clip.id)}">✓ Approve</button>
+              ` : ''}
+              ${isApproved ? `
+                <button class="btn btn-primary btn-sm upload-clip-btn btn-full" data-id="${esc(clip.id)}">🚀 Upload to YouTube</button>
+              ` : ''}
+            `}
+            <button class="btn btn-secondary btn-sm delete-clip-btn" data-id="${esc(clip.id)}" title="Delete Clip">Delete</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
 }
-$('reconnectYoutube').onclick=async()=>{
-  if(!canAct() || busy() || youtubeAuthSubmitting) return;
-  const popup=window.open('about:blank','_blank');
-  if(popup) popup.opener=null;
-  youtubeAuthSubmitting=true;renderYoutubeAuth();
+
+// Render Discovered Episodes Table
+function renderEpisodesTable(episodes) {
+  const tbody = $('episodesTableBody');
+  if (!episodes.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="table-loading">No episodes discovered yet. Click "Discover New Episodes" to scan feeds.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = episodes.map(ep => {
+    const isAuth = ep.rights_status === 'authorized';
+    const isProc = ep.status === 'processed';
+    const isProcIng = ep.status === 'processing';
+    const score = ep.discovery_score ? Math.round(ep.discovery_score * 100) : 50;
+    const dur = formatDuration(ep.duration_seconds);
+
+    return `
+      <tr>
+        <td class="ep-title">
+          <a href="${esc(ep.video_url)}" target="_blank" rel="noopener noreferrer" class="ep-link">
+            ${esc(ep.title)} ↗
+          </a>
+        </td>
+        <td>${esc(ep.channel_name || ep.source_id)}</td>
+        <td>${dur}</td>
+        <td><strong class="ep-score">${score} / 100</strong></td>
+        <td>
+          <span class="badge ${isAuth ? 'badge-success' : 'badge-candidate'}">
+            ${esc(ep.rights_status || 'unknown')}
+          </span>
+        </td>
+        <td class="text-right">
+          ${isProc ? `
+            <span class="badge badge-success">Processed</span>
+          ` : isProcIng ? `
+            <span class="badge badge-candidate">Clipping...</span>
+          ` : isAuth ? `
+            <button class="btn btn-primary btn-sm clip-ep-btn" data-id="${esc(ep.id)}">⚡ Clip Now</button>
+          ` : `
+            <button class="btn btn-secondary btn-sm auth-ep-btn" data-id="${esc(ep.id)}" data-title="${esc(ep.title)}">Authorize</button>
+          `}
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// Render Creators List
+function renderSources(sources) {
+  const container = $('sourcesList');
+  if (!sources.length) {
+    container.innerHTML = `<p class="table-loading">No podcast sources configured.</p>`;
+    return;
+  }
+
+  container.innerHTML = sources.map(src => {
+    const isEnabled = src.enabled !== false;
+    return `
+      <div class="source-item">
+        <div class="source-info">
+          <h4>${esc(src.name)} (${esc(src.show_name)})</h4>
+          <p>${esc(src.youtube_channel_url || 'YouTube Channel')}</p>
+        </div>
+        <button class="btn ${isEnabled ? 'btn-secondary' : 'btn-primary'} btn-sm toggle-source-btn" data-id="${esc(src.id)}">
+          ${isEnabled ? 'Enabled ✓' : 'Disabled'}
+        </button>
+      </div>
+    `;
+  }).join('');
+}
+
+// Render YouTube Connection Status
+function renderYouTubeStatus() {
+  const yt = state?.youtube_authorization || {};
+  const isAuth = yt.authenticated || state?.settings?.token_present;
+  $('ytBadge').textContent = isAuth ? 'Connected' : 'Needs Setup';
+  $('ytBadge').className = `badge ${isAuth ? 'badge-success' : 'badge-candidate'}`;
+  $('ytChannelName').textContent = yt.channel_name || 'Authorized YouTube Channel';
+  $('ytStatusNote').textContent = isAuth 
+    ? 'Authenticated via OAuth. Shorts upload to your channel in private review mode.'
+    : 'Not authenticated. Click Reconnect to link your channel.';
+}
+
+// Render Daily 5-Shorts Automation Schedule
+function renderAutomationSchedule(schedule) {
+  if (!schedule) return;
+
+  if ($('currentTimeDisplay')) $('currentTimeDisplay').textContent = schedule.current_time_ist || 'Asia/Kolkata (IST)';
+  if ($('nextSlotDisplay')) $('nextSlotDisplay').textContent = schedule.next_slot?.time_display || '19:00 IST';
+  if ($('nextSlotLabel')) $('nextSlotLabel').textContent = `${schedule.next_slot?.label || 'Slot 1/5'} (${schedule.next_slot?.status || 'Scheduled'})`;
+  if ($('bannerNextSlot')) $('bannerNextSlot').textContent = `Next: ${schedule.next_slot?.label || 'Slot 1/5'} at ${schedule.next_slot?.time_display || '7:00 PM IST'}`;
+  
+  const readyCount = schedule.ready_queue_count || 0;
+  if ($('queueCountDisplay')) $('queueCountDisplay').textContent = `${readyCount} Ready`;
+  if ($('queueHealthLabel')) $('queueHealthLabel').textContent = readyCount >= 5 ? '✓ Queue ready for tonight' : 'Preparing queue in background';
+
+  const slotsContainer = $('scheduleSlotsList');
+  if (slotsContainer && schedule.slots) {
+    slotsContainer.innerHTML = schedule.slots.map(s => {
+      const isNext = schedule.next_slot && schedule.next_slot.slot === s.slot;
+      const statusBadge = isNext ? '<span class="badge badge-candidate">Next Up</span>' :
+                          s.status === 'completed' ? '<span class="badge badge-uploaded">Done Today</span>' :
+                          '<span class="badge badge-approved">Scheduled</span>';
+      return `
+        <div class="schedule-slot-item ${isNext ? 'slot-next' : ''}">
+          <div class="slot-time-col">
+            <span class="slot-time-text">${esc(s.time_display)}</span>
+            <span class="slot-num">${esc(s.label)}</span>
+          </div>
+          <div class="slot-status-col">
+            ${statusBadge}
+            <span class="slot-desc">Auto-approves top scored clip and uploads to YouTube Shorts in Private Review Mode</span>
+          </div>
+          <div class="slot-action-col">
+            <button class="btn btn-primary btn-sm run-slot-btn" data-slot="${esc(s.slot)}">
+              ⚡ Publish Slot ${esc(s.slot)} Now
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+}
+
+// NAVIGATION TABS
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.onclick = e => {
+    e.preventDefault();
+    const tab = item.dataset.tab;
+    document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+    item.classList.add('active');
+
+    // Hide all sections
+    $('clipsStudioSection').hidden = tab !== 'clipsStudio';
+    $('manualCreatorSection').hidden = tab !== 'manualCreator' && tab !== 'clipsStudio';
+    $('episodesFeedSection').hidden = tab !== 'episodesFeed';
+    $('sourcesSettingsSection').hidden = tab !== 'sourcesSettings';
+    $('automationScheduleSection').hidden = tab !== 'automationSchedule';
+
+    const titles = {
+      clipsStudio: ['Channel overview & Clips Studio', 'Review AI-extracted 9:16 vertical Shorts and publish to YouTube in private mode'],
+      automationSchedule: ['Daily Shorts Automation & Schedule', 'Automated background publisher running 5 Shorts every evening between 7:00 PM and 9:00 PM IST'],
+      manualCreator: ['Create Shorts Clip', 'Paste any podcast or video URL to automatically extract vertical Shorts with animated captions'],
+      episodesFeed: ['Discovered Episodes Feed', 'Podcast episodes discovered from your creators, ranked by topic relevance'],
+      sourcesSettings: ['Creators & Channel Settings', 'Configure podcast source channels and YouTube publishing settings']
+    };
+
+    if (titles[tab]) {
+      $('pageTitle').textContent = titles[tab][0];
+      $('pageSubtitle').textContent = titles[tab][1];
+    }
+  };
+});
+
+// CLIPS FILTER PILLS
+document.querySelectorAll('.filter-pill').forEach(pill => {
+  pill.onclick = () => {
+    document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+    pill.classList.add('active');
+    activeFilter = pill.dataset.filter;
+    renderClipsGallery(state?.podcast?.clips || []);
+  };
+});
+
+// FORM: MANUAL LINK SUBMISSION
+$('manualClipForm').onsubmit = async e => {
+  e.preventDefault();
+  const url = $('videoUrlInput').value.trim();
+  const clips = parseInt($('clipsCountSelect').value, 10);
+  const style = $('subtitleStyleSelect').value;
+  const bgmVibe = $('bgmSelect').value;
+  const autoUpload = $('autoUploadCheck').checked;
+
+  if (!url) {
+    toast('Please enter a valid YouTube video URL.', 'error');
+    return;
+  }
+
+  $('startClippingBtn').disabled = true;
+  $('startClippingBtn').textContent = 'Extracting Details...';
+
   try {
-    const result=await post({action:'youtube_reconnect'}),url=new URL(result.authorization_url);
-    if(url.protocol!=='https:' || url.hostname!=='accounts.google.com') throw new Error('Google sign-in link was rejected.');
-    $('youtubeAuthLink').href=url.href;$('youtubeAuthLink').hidden=false;
-    if(popup) popup.location.href=url.href;
-    toast('Finish Google sign-in in the other tab, then return here.');
+    toast('Ingesting video and launching transcription pipeline...', 'info');
+    const res = await post({
+      action: 'podcast_manual_clip',
+      url,
+      clips,
+      style,
+      bgm_vibe: bgmVibe,
+      auto_upload: autoUpload
+    });
+    toast(res.message || 'Clipping started in background! Check back in 1-2 minutes.', 'success');
+    $('videoUrlInput').value = '';
+    setTimeout(refresh, 2000);
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    $('startClippingBtn').disabled = false;
+    $('startClippingBtn').innerHTML = '<span>🚀</span> Generate 9:16 Shorts';
+  }
+};
+
+// BUTTON: AUTO-CLIP TOP EPISODE
+$('autoClipBtn').onclick = async () => {
+  $('autoClipBtn').disabled = true;
+  try {
+    toast('Discovering and selecting the highest-scored podcast episode...', 'info');
+    const res = await post({
+      action: 'podcast_auto_clip_top',
+      clips: 3,
+      style: 'dynamic'
+    });
+    toast(res.message || 'Auto-clip started for top episode!', 'success');
+    setTimeout(refresh, 2500);
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    $('autoClipBtn').disabled = false;
+  }
+};
+
+// BUTTON: DISCOVER EPISODES
+$('discoverEpisodesBtn').onclick = async () => {
+  $('discoverEpisodesBtn').disabled = true;
+  try {
+    toast('Scanning feeds and channels for new podcast episodes...', 'info');
+    const res = await post({ action: 'podcast_discover' });
+    toast(res.message || 'Discovery complete!', 'success');
     await refresh();
-  } catch(error) {if(popup) popup.close();toast(error.message,'error');}
-  finally {youtubeAuthSubmitting=false;renderYoutubeAuth();}
-};
-$('cancelYoutubeAuth').onclick=async()=>{
-  youtubeAuthSubmitting=true;renderYoutubeAuth();
-  try {await post({action:'cancel_youtube_auth'});await refresh();}
-  catch(error) {toast(error.message,'error');}
-  finally {youtubeAuthSubmitting=false;renderYoutubeAuth();}
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    $('discoverEpisodesBtn').disabled = false;
+  }
 };
 
-function renderCreativeLibrary() {
-  const lib=state?.creative_library;
-  $('creativeLibrarySummary').textContent=lib?`${lib.animations} imported animations · ${lib.sounds} imported sounds · original defaults included`:'Original animation and sound effects included.';
-  $('creativeLibraryItems').innerHTML=(lib?.items || []).map(item=>`<li><strong>${esc(item.name)}</strong> · ${esc(item.kind==='animation'?'Animation':'Sound')}<br>${esc(item.attribution)}<br>${esc(item.license)}</li>`).join('');
-  $('importCreative').disabled=!canAct() || busy() || creativeImportBusy;
+// REFRESH BUTTON
+$('refreshBtn').onclick = async () => {
+  toast('Refreshing dashboard...', 'info');
+  await refresh();
+};
+
+// DELEGATED EVENT HANDLERS (CLIPS & EPISODES)
+document.addEventListener('click', async e => {
+  // 0. Quick load sample URL
+  if (e.target.matches('.sample-pill')) {
+    const sampleUrl = e.target.dataset.url;
+    if (sampleUrl) {
+      $('videoUrlInput').value = sampleUrl;
+      $('videoUrlInput').focus();
+      toast(`Loaded URL for ${e.target.textContent.trim()}!`, 'info');
+    }
+    return;
+  }
+
+  // 1. Edit / Preview Clip or Click Media Poster
+  const mediaBox = e.target.closest('.clip-media-box');
+  if (e.target.matches('.edit-clip-btn') || mediaBox) {
+    const clipId = (mediaBox || e.target).dataset.id;
+    const clip = state?.podcast?.clips?.find(c => c.id === clipId);
+    if (!clip) return;
+    openClipModal(clip);
+    return;
+  }
+
+  // 2. Approve Clip
+  if (e.target.matches('.approve-clip-btn')) {
+    const clipId = e.target.dataset.id;
+    try {
+      await post({ action: 'podcast_approve_clip', clip_id: clipId });
+      toast('Clip approved! Ready to publish to YouTube.', 'success');
+      await refresh();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+    return;
+  }
+
+  // 3. Upload to YouTube
+  if (e.target.matches('.upload-clip-btn')) {
+    const clipId = e.target.dataset.id;
+    e.target.disabled = true;
+    e.target.textContent = 'Uploading...';
+    try {
+      toast('Uploading Short to your YouTube channel in private mode...', 'info');
+      const res = await post({ action: 'podcast_upload_clip', clip_id: clipId, privacy: 'private' });
+      toast(res.message || 'Short uploaded successfully to YouTube!', 'success');
+      await refresh();
+    } catch (err) {
+      toast(err.message, 'error');
+      e.target.disabled = false;
+      e.target.textContent = '🚀 Upload to YouTube';
+    }
+    return;
+  }
+
+  // 4. Delete Clip
+  if (e.target.matches('.delete-clip-btn')) {
+    const clipId = e.target.dataset.id;
+    if (!confirm('Are you sure you want to remove this clip record?')) return;
+    try {
+      await post({ action: 'podcast_delete_clip', clip_id: clipId });
+      toast('Clip removed.', 'success');
+      await refresh();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+    return;
+  }
+
+  // 5. Clip Discovered Episode (Instant 1-Click)
+  const clipBtn = e.target.closest('.clip-ep-btn');
+  if (clipBtn) {
+    const epId = clipBtn.dataset.id;
+    clipBtn.disabled = true;
+    clipBtn.textContent = 'Clipping...';
+    try {
+      toast(`Started clipping ${epId} in background...`, 'info');
+      await post({ action: 'podcast_process', episode_id: epId, clips: 3, style: 'dynamic' });
+      toast('Processing underway! Check the Clips Studio in 1-2 minutes.', 'success');
+      setTimeout(refresh, 2000);
+    } catch (err) {
+      toast(err.message, 'error');
+      clipBtn.disabled = false;
+      clipBtn.textContent = '⚡ Clip Now';
+    }
+    return;
+  }
+
+  // 6. Open Authorize Dialog
+  const authBtn = e.target.closest('.auth-ep-btn');
+  if (authBtn) {
+    const epId = authBtn.dataset.id;
+    const epTitle = authBtn.dataset.title;
+    $('authEpisodeId').value = epId;
+    $('authEpisodeTitleDisplay').textContent = epTitle;
+    $('authModal').showModal();
+    return;
+  }
+
+  // 7. Toggle Creator Source
+  if (e.target.matches('.toggle-source-btn')) {
+    const srcId = e.target.dataset.id;
+    try {
+      const res = await post({ action: 'podcast_toggle_source', source_id: srcId });
+      toast(res.message || 'Source updated.', 'success');
+      await refresh();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+    return;
+  }
+
+  // 8. Run Specific Scheduled Slot
+  const runSlotBtn = e.target.closest('.run-slot-btn');
+  if (runSlotBtn) {
+    const slotNum = runSlotBtn.dataset.slot;
+    runSlotBtn.disabled = true;
+    runSlotBtn.textContent = 'Publishing...';
+    try {
+      toast(`Triggering automated publish for Slot ${slotNum}...`, 'info');
+      const res = await post({ action: 'podcast_publish_slot', slot: slotNum, privacy: 'private' });
+      toast(res.message || `Slot ${slotNum} published!`, 'success');
+      await refresh();
+    } catch (err) {
+      toast(err.message, 'error');
+      runSlotBtn.disabled = false;
+      runSlotBtn.textContent = `⚡ Publish Slot ${slotNum} Now`;
+    }
+    return;
+  }
+});
+
+// MODAL: CLIP PREVIEW & EDIT
+function openClipModal(clip) {
+  currentModalClip = clip;
+  $('modalClipTitle').textContent = clip.generated_title || 'Clip Preview';
+  $('editTitleInput').value = clip.generated_title || '';
+  $('editDescInput').value = clip.generated_description || '';
+  $('modalClipScore').textContent = `${Math.round(clip.ai_score || 75)} / 100`;
+  $('modalClipDuration').textContent = formatDuration(clip.duration_seconds);
+  $('modalClipStatus').textContent = clip.status?.toUpperCase() || 'CANDIDATE';
+
+  const player = $('modalVideoPlayer');
+  if (clip.output_path) {
+    player.src = `/media/podcast/clip/${clip.id}/final.mp4`;
+    player.poster = `/media/podcast/clip/${clip.id}/thumbnail.png`;
+    player.hidden = false;
+  } else {
+    player.hidden = true;
+  }
+
+  const ytUrl = clip.youtube_url || (clip.youtube_video_id ? `https://www.youtube.com/shorts/${clip.youtube_video_id}` : null);
+  if (ytUrl) {
+    $('modalYoutubeRow').hidden = false;
+    $('modalYoutubeLink').href = ytUrl;
+  } else {
+    $('modalYoutubeRow').hidden = true;
+  }
+
+  $('modalApproveBtn').hidden = clip.status === 'approved' || clip.status === 'uploaded';
+  $('modalUploadBtn').hidden = clip.status === 'uploaded';
+
+  $('clipModal').showModal();
 }
-$('creativeKind').onchange=()=>{
-  const sound=$('creativeKind').value==='sound_effect';
-  $('creativeFile').value='';$('creativeFile').accept=sound?'.wav,.mp3,.ogg':'.json';
-  $('creativeFileHelp').textContent=sound?'WAV, MP3 or OGG, up to 8 MB and 5 seconds.':'Vector-only JSON, up to 2 MB. No external images, fonts or expressions.';
-  $('creativeSource').placeholder=sound?'https://freesound.org/people/…/sounds/…/':'https://lottiefiles.com/free-animation/…';
-  $('creativeLicenseLabel').textContent=sound?'I checked that this sound is under CC0 (not CC BY or CC BY-NC).':'I checked that this asset is under the Lottie Simple License.';
-  $('creativeRights').checked=false;
+
+$('closeClipModal').onclick = () => {
+  $('modalVideoPlayer').pause();
+  $('clipModal').close();
 };
-$('creativeImportForm').onsubmit=async event=>{
-  event.preventDefault();if(!canAct() || busy() || creativeImportBusy || !$('creativeImportForm').reportValidity()) return;
-  const file=$('creativeFile').files[0],sound=$('creativeKind').value==='sound_effect';
-  if(!file || file.size>(sound?8000000:2000000)) {$('creativeImportMessage').textContent='File exceeds the size limit.';return;}
-  creativeImportBusy=true;renderCreativeLibrary();$('creativeImportMessage').textContent='Checking and importing locally…';
+
+// Modal Actions
+$('modalSaveMetaBtn').onclick = async () => {
+  if (!currentModalClip) return;
+  const title = $('editTitleInput').value.trim();
+  const desc = $('editDescInput').value.trim();
   try {
-    const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(new Error('Could not read the file.'));reader.readAsDataURL(file);});
-    const body={kind:$('creativeKind').value,data,name:$('creativeName').value.trim(),author:$('creativeAuthor').value.trim(),source_url:$('creativeSource').value.trim(),tags:$('creativeTags').value.split(',').map(t=>t.trim()).filter(Boolean),rights_confirmed:$('creativeRights').checked,license:sound?'CC0-1.0':'Lottie Simple License'};
-    const result=await api('/api/creative/import',{method:'POST',headers:{'Content-Type':'application/json','X-AutoYT-Token':token},body:JSON.stringify(body)},45000);
-    state.creative_library=result.creative_library;renderCreativeLibrary();$('creativeImportMessage').textContent=result.message;$('creativeFile').value='';$('creativeRights').checked=false;
-  } catch(error) {$('creativeImportMessage').textContent=error.message;}
-  finally {creativeImportBusy=false;renderCreativeLibrary();}
+    await post({
+      action: 'podcast_update_clip',
+      clip_id: currentModalClip.id,
+      title,
+      description: desc
+    });
+    toast('Clip title and description saved!', 'success');
+    await refresh();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
 };
+
+$('modalApproveBtn').onclick = async () => {
+  if (!currentModalClip) return;
+  try {
+    await post({ action: 'podcast_approve_clip', clip_id: currentModalClip.id });
+    toast('Clip approved!', 'success');
+    $('modalApproveBtn').hidden = true;
+    await refresh();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+};
+
+$('modalUploadBtn').onclick = async () => {
+  if (!currentModalClip) return;
+  $('modalUploadBtn').disabled = true;
+  $('modalUploadBtn').textContent = 'Uploading...';
+  try {
+    toast('Uploading Short to YouTube...', 'info');
+    const res = await post({
+      action: 'podcast_upload_clip',
+      clip_id: currentModalClip.id,
+      privacy: 'private'
+    });
+    toast(res.message || 'Uploaded successfully!', 'success');
+    $('clipModal').close();
+    await refresh();
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    $('modalUploadBtn').disabled = false;
+    $('modalUploadBtn').textContent = '🚀 Upload to YouTube';
+  }
+};
+
+// MODAL: AUTHORIZE RIGHTS
+$('closeAuthModal').onclick = () => $('authModal').close();
+$('cancelAuthModalBtn').onclick = () => $('authModal').close();
+
+$('authForm').onsubmit = async e => {
+  e.preventDefault();
+  const epId = $('authEpisodeId').value;
+  const basis = $('authBasisSelect').value;
+  const notes = $('authNotesInput').value.trim();
+
+  try {
+    await post({
+      action: 'podcast_authorize',
+      episode_id: epId,
+      basis,
+      notes
+    });
+    toast('Episode authorized! You can now clip it.', 'success');
+    $('authModal').close();
+    await refresh();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+};
+
+$('blockEpBtn').onclick = async () => {
+  const epId = $('authEpisodeId').value;
+  try {
+    await post({ action: 'podcast_block', episode_id: epId, reason: 'Manually blocked in dashboard' });
+    toast('Episode blocked from processing.', 'info');
+    $('authModal').close();
+    await refresh();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+};
+
+// YOUTUBE RECONNECT
+$('ytReconnectBtn').onclick = async () => {
+  try {
+    const res = await post({ action: 'youtube_reconnect' });
+    if (res.auth_url) {
+      $('ytAuthContinueLink').href = res.auth_url;
+      $('ytAuthContinueLink').hidden = false;
+      toast('Click "Complete in Google" to sign in and grant upload permission.', 'info');
+    }
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+};
+
+// AUTOMATION & SCHEDULE ACTIONS
+$('btnViewScheduleTab').onclick = () => {
+  const scheduleNav = document.querySelector('[data-tab="automationSchedule"]');
+  if (scheduleNav) scheduleNav.click();
+};
+
+$('btnQuickPublishSlot').onclick = async () => {
+  const nextSlotNum = state?.podcast?.schedule?.next_slot?.slot || 1;
+  $('btnQuickPublishSlot').disabled = true;
+  $('btnQuickPublishSlot').textContent = 'Publishing...';
+  try {
+    toast(`Triggering automated publish for Slot ${nextSlotNum}...`, 'info');
+    const res = await post({ action: 'podcast_publish_slot', slot: nextSlotNum, privacy: 'private' });
+    toast(res.message || 'Slot published successfully!', 'success');
+    await refresh();
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    $('btnQuickPublishSlot').disabled = false;
+    $('btnQuickPublishSlot').innerHTML = '<span>🚀</span> Publish Next Slot Now';
+  }
+};
+
+$('btnPrepareQueueNow').onclick = async () => {
+  $('btnPrepareQueueNow').disabled = true;
+  try {
+    toast('Checking queue and clipping episodes if needed...', 'info');
+    const res = await post({ action: 'podcast_prepare_queue' });
+    toast(res.message || 'Queue verified!', 'success');
+    await refresh();
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    $('btnPrepareQueueNow').disabled = false;
+  }
+};
+
+$('btnRefreshSchedule').onclick = async () => {
+  toast('Refreshing schedule and queue status...', 'info');
+  await refresh();
+};
+
+// INITIALIZATION & PERIODIC REFRESH
+refresh();
+setInterval(refresh, 6000);

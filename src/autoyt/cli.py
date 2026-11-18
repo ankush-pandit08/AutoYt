@@ -96,6 +96,227 @@ def cleanup(cfg):
     return {"intermediate_files_removed": removed}
 
 
+def _podcast_commands(sub):
+    """Register 'podcast' subcommand group and its sub-subcommands."""
+    podcast = sub.add_parser("podcast", help="Podcast clipping platform commands")
+    psub = podcast.add_subparsers(dest="podcast_command", required=True)
+
+    # podcast sources
+    psub.add_parser("sources", help="List configured podcast sources")
+
+    # podcast discover
+    disc = psub.add_parser("discover", help="Discover new episodes from all enabled sources")
+    disc.add_argument("--source", dest="source_id", default=None,
+                      help="Limit discovery to a single source ID")
+
+    # podcast episodes
+    eps = psub.add_parser("episodes", help="List discovered podcast episodes")
+    eps.add_argument("--status", default=None,
+                     help="Filter by status (discovered|authorized|processing|processed|skipped|failed)")
+    eps.add_argument("--source", dest="source_id", default=None,
+                     help="Filter by source ID")
+
+    # podcast authorize
+    auth = psub.add_parser("authorize", help="Grant processing authorisation for an episode")
+    auth.add_argument("episode_id", help="Episode ID (source_id:video_id)")
+    auth.add_argument("--basis", required=True,
+                      choices=["creator_permission", "cc_license", "public_domain",
+                               "fair_use_claimed", "other"],
+                      help="Rights basis for authorisation")
+    auth.add_argument("--evidence-url", default=None,
+                      help="URL to permission email or license page")
+    auth.add_argument("--notes", default=None,
+                      help="Optional free-form notes")
+
+    # podcast clips
+    clips = psub.add_parser("clips", help="List podcast clips")
+    clips.add_argument("--episode", dest="episode_id", default=None,
+                       help="Filter by episode ID")
+    clips.add_argument("--status", default=None,
+                       help="Filter by status (candidate|approved|rejected|rendered|uploaded|failed)")
+
+    # podcast process
+    proc = psub.add_parser("process", help="Process an authorized episode into candidate clips")
+    proc.add_argument("episode_id", help="Episode ID (source_id:video_id)")
+    proc.add_argument("--clips", type=int, default=4, help="Maximum number of clips to extract")
+    proc.add_argument("--style", choices=["minimal", "dynamic", "bold"], default="dynamic",
+                      help="Subtitle style")
+
+    # podcast approve
+    appr = psub.add_parser("approve", help="Approve a clip for YouTube upload")
+    appr.add_argument("clip_id", help="Clip ID (episode_id:clip_index)")
+
+    # podcast reject
+    rej = psub.add_parser("reject", help="Reject a clip")
+    rej.add_argument("clip_id", help="Clip ID (episode_id:clip_index)")
+    rej.add_argument("--reason", default=None, help="Reason for rejection")
+
+    # podcast upload
+    upl = psub.add_parser("upload", help="Upload an approved clip to YouTube (private review mode)")
+    upl.add_argument("clip_id", help="Clip ID to upload")
+    upl.add_argument("--privacy", choices=["private", "unlisted", "public"], default="private",
+                     help="YouTube privacy setting (default: private)")
+
+    # podcast publish-next
+    pub = psub.add_parser("publish-next", help="Publish next ready Short in queue (used by daily 7pm-9pm automated scheduler)")
+    pub.add_argument("--privacy", choices=["private", "unlisted", "public"], default="private",
+                     help="YouTube privacy setting (default: private)")
+    pub.add_argument("--slot", type=int, default=1, help="Slot index (1-5 for evening window)")
+
+    # podcast scheduler
+    psub.add_parser("scheduler", help="Run foreground podcast scheduler (08:00, 14:00, 18:00 prep, 19:00-21:00 5-Shorts publish IST)")
+
+    return podcast
+
+
+def _run_podcast(args, cfg):
+    """Execute the requested podcast sub-command."""
+    from .podcast.sources import SourceRegistry
+    from .store import Store
+    store = Store(cfg.database_path)
+
+    if args.podcast_command == "sources":
+        registry = SourceRegistry()
+        return {
+            "sources": [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "show_name": s.show_name,
+                    # Channel IDs are placeholders — verify before use (see sources.py TODO)
+                    "youtube_channel_id": s.youtube_channel_id,
+                    "enabled": s.enabled,
+                    "priority_topics": s.priority_topics,
+                }
+                for s in registry.all()
+            ]
+        }
+
+    if args.podcast_command == "discover":
+        from .podcast.discovery import EpisodeDiscovery
+        registry = SourceRegistry()
+        discovery = EpisodeDiscovery(cfg, store)
+
+        if getattr(args, "source_id", None):
+            source = registry.get(args.source_id)
+            if not source:
+                raise ValueError(f"Source '{args.source_id}' not found in registry")
+            episodes = discovery.discover_episodes(source)
+        else:
+            episodes = discovery.discover_all_sources(registry)
+
+        # Save to store
+        saved = 0
+        for ep in episodes:
+            existing = store.get_podcast_episode(ep.id)
+            if existing is None:
+                store.save_podcast_episode({
+                    **ep.to_dict(),
+                    "status": "discovered",
+                })
+                saved += 1
+
+        return {
+            "discovered": len(episodes),
+            "new_saved": saved,
+            "episodes": [ep.to_dict() for ep in episodes[:20]],
+        }
+
+    if args.podcast_command == "episodes":
+        episodes = store.list_podcast_episodes(
+            status=getattr(args, "status", None),
+            source_id=getattr(args, "source_id", None),
+        )
+        return {"count": len(episodes), "episodes": episodes}
+
+    if args.podcast_command == "authorize":
+        from .podcast.rights import RightsChecker
+        checker = RightsChecker(store)
+        record = checker.grant_authorization(
+            args.episode_id,
+            args.basis,
+            evidence_url=args.evidence_url,
+            notes=args.notes,
+        )
+        return record.to_dict()
+
+    if args.podcast_command == "clips":
+        clips = store.list_podcast_clips(
+            episode_id=getattr(args, "episode_id", None),
+            status=getattr(args, "status", None),
+        )
+        return {"count": len(clips), "clips": clips}
+
+    if args.podcast_command == "process":
+        from .podcast.pipeline import PodcastPipeline
+        pipeline = PodcastPipeline(cfg, store)
+        results = pipeline.process_episode(
+            args.episode_id,
+            max_clips=getattr(args, "clips", 4),
+            subtitle_style=getattr(args, "style", "dynamic"),
+        )
+        return {
+            "episode_id": args.episode_id,
+            "clips_generated": len(results),
+            "clips": [
+                {
+                    "clip_id": r.clip_id,
+                    "title": r.title,
+                    "score": r.score,
+                    "duration": r.duration,
+                    "video": str(r.video_path),
+                    "thumbnail": str(r.thumbnail_path),
+                }
+                for r in results
+            ],
+        }
+
+    if args.podcast_command == "approve":
+        clip = store.get_podcast_clip(args.clip_id)
+        if not clip:
+            raise ValueError(f"Clip '{args.clip_id}' not found")
+        store.update_clip_status(args.clip_id, "approved")
+        return {"clip_id": args.clip_id, "status": "approved"}
+
+    if args.podcast_command == "reject":
+        clip = store.get_podcast_clip(args.clip_id)
+        if not clip:
+            raise ValueError(f"Clip '{args.clip_id}' not found")
+        store.update_clip_status(
+            args.clip_id, "rejected", review_notes=getattr(args, "reason", None)
+        )
+        return {"clip_id": args.clip_id, "status": "rejected"}
+
+    if args.podcast_command == "upload":
+        from .podcast.publisher import PodcastPublisher
+        publisher = PodcastPublisher(cfg, store)
+        return publisher.upload_clip(args.clip_id, privacy=getattr(args, "privacy", "private"))
+
+    if args.podcast_command == "publish-next":
+        from .podcast.scheduler import PodcastScheduler
+        sched = PodcastScheduler(cfg, store)
+        return sched.job_publish_scheduled_short(
+            slot_number=getattr(args, "slot", 1),
+            privacy=getattr(args, "privacy", "private")
+        )
+
+    if args.podcast_command == "scheduler":
+        import time
+
+        from .podcast.scheduler import PodcastScheduler
+        sched = PodcastScheduler(cfg, store)
+        sched.start()
+        print("Podcast scheduler running (Asia/Kolkata: 08:00, 14:00, 18:00 prep, 19:00-21:00 5-Shorts publish IST). Press Ctrl+C to stop.")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            sched.shutdown()
+        return None
+
+    raise ValueError(f"Unknown podcast command: {args.podcast_command}")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="autoyt", description="Personal local technology Shorts pipeline")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -111,6 +332,7 @@ def main(argv=None):
         sub.add_parser(name)
     for name in ("retry", "upload"):
         sub.add_parser(name).add_argument("job_id")
+    _podcast_commands(sub)
     args = parser.parse_args(argv)
     try:
         from .voice_settings import apply
@@ -175,6 +397,8 @@ def main(argv=None):
         elif args.command == "cleanup":
             with pipeline_lock(cfg):
                 result = cleanup(cfg)
+        elif args.command == "podcast":
+            result = _run_podcast(args, cfg)
         if result is not None:
             print(json.dumps(result, indent=2, default=str))
         if isinstance(result, dict) and result.get("state") == "FAILED":
@@ -185,7 +409,7 @@ def main(argv=None):
         return 2
     except Exception as error:
         # Config validation and remote exceptions may contain secrets; never print their repr.
-        if type(error) in (ValueError, RuntimeError, FileNotFoundError):
+        if type(error) in (ValueError, RuntimeError, FileNotFoundError, PermissionError):
             print(str(error), file=sys.stderr)
         else:
             print(f"{type(error).__name__}: check .env and run autoyt doctor; details withheld to protect credentials.",

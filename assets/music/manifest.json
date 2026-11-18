@@ -1,0 +1,37 @@
+{
+  "inspirational": {
+    "file": "assets/music/inspirational/Uniq_Art_Of_Silence_V2.ogg",
+    "title": "Art Of Silence V2",
+    "artist": "Uniq",
+    "license": "CC BY 4.0",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/5/52/Uniq_-_Art_Of_Silence_V2.ogg"
+  },
+  "motivational": {
+    "file": "assets/music/motivational/Alexander_Nakarada_Superepic.ogg",
+    "title": "Superepic",
+    "artist": "Alexander Nakarada",
+    "license": "CC BY 4.0",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/a/ac/Superepic_by_Alexander_Nakarada.ogg"
+  },
+  "serious": {
+    "file": "assets/music/serious/Alexander_Nakarada_Winter_Night.ogg",
+    "title": "Winter Night",
+    "artist": "Alexander Nakarada",
+    "license": "CC BY 4.0",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/4/46/Alexander_Nakarada_-_Winter_Night_%28cc-by%29_%28filmmusic%29.ogg"
+  },
+  "comedy": {
+    "file": "assets/music/comedy/Kevin_MacLeod_Carefree.ogg",
+    "title": "Carefree",
+    "artist": "Kevin MacLeod",
+    "license": "CC BY 4.0",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/5/58/Kevin_MacLeod_-_Carefree.ogg"
+  },
+  "mindset": {
+    "file": "assets/music/mindset/Kevin_MacLeod_Tranquility.ogg",
+    "title": "Tranquility",
+    "artist": "Kevin MacLeod",
+    "license": "CC BY 4.0",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/3/3d/Kevin_MacLeod_-_Tranquility.ogg"
+  }
+}

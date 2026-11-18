@@ -23,7 +23,7 @@ def test_private_upload_records_survive_v1_to_v2_migration(tmp_path):
     with store.connect() as db:
         assert tuple(db.execute("SELECT * FROM youtube_uploads").fetchone()) == (
             "original", "original-video", "private", "2026-10-18")
-        assert db.execute("SELECT max(version) FROM schema_version").fetchone()[0] == 2
+        assert db.execute("SELECT max(version) FROM schema_version").fetchone()[0] >= 2
     job = store.create()
     store.confirm_upload(job, "new-video", privacy="public")
     Store(path)  # Opening again must not redo or lose the migration.

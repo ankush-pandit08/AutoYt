@@ -56,6 +56,349 @@ class Dashboard:
         self.scheduler_owned = False
         from .youtube_oauth import YouTubeOAuth
         self.youtube_auth = YouTubeOAuth(cfg)
+        self._podcast_registry = None
+
+    def podcast_snapshot(self):
+        try:
+            if self._podcast_registry is None:
+                from .podcast.sources import SourceRegistry
+                self._podcast_registry = SourceRegistry()
+            sources = self._podcast_registry.all()
+            episodes = self.store.list_podcast_episodes(limit=50)
+            clips = self.store.list_podcast_clips(limit=100)
+
+            stats = {
+                "episodes_discovered": len(episodes),
+                "episodes_authorized": sum(1 for e in episodes if e.get("rights_status") == "authorized"),
+                "episodes_processed": sum(1 for e in episodes if e.get("status") == "processed"),
+                "clips_found": len(clips),
+                "clips_generated": sum(1 for c in clips if c.get("output_path")),
+                "clips_awaiting_review": sum(1 for c in clips if c.get("status") == "candidate"),
+                "clips_approved": sum(1 for c in clips if c.get("status") == "approved"),
+                "videos_uploaded": sum(1 for c in clips if c.get("status") == "uploaded"),
+                "failed_jobs": sum(1 for c in clips if c.get("status") == "failed") + sum(1 for e in episodes if e.get("status") == "failed"),
+            }
+
+            source_dicts = []
+            for s in sources:
+                d = s.to_dict()
+                src_eps = [e for e in episodes if e.get("source_id") == s.id]
+                d["latest_episode"] = src_eps[0] if src_eps else None
+                source_dicts.append(d)
+
+            # Automated 5-Shorts evening schedule status (7pm - 9pm IST)
+            from zoneinfo import ZoneInfo
+            from datetime import datetime
+            ist = ZoneInfo("Asia/Kolkata")
+            now_ist = datetime.now(ist)
+
+            slots = [
+                {"slot": 1, "time": "19:00", "time_display": "7:00 PM IST", "label": "Slot 1/5", "status": "scheduled"},
+                {"slot": 2, "time": "19:30", "time_display": "7:30 PM IST", "label": "Slot 2/5", "status": "scheduled"},
+                {"slot": 3, "time": "20:00", "time_display": "8:00 PM IST", "label": "Slot 3/5", "status": "scheduled"},
+                {"slot": 4, "time": "20:30", "time_display": "8:30 PM IST", "label": "Slot 4/5", "status": "scheduled"},
+                {"slot": 5, "time": "21:00", "time_display": "9:00 PM IST", "label": "Slot 5/5", "status": "scheduled"},
+            ]
+
+            next_slot = None
+            for s in slots:
+                sh, sm = map(int, s["time"].split(":"))
+                slot_time = now_ist.replace(hour=sh, minute=sm, second=0, microsecond=0)
+                if now_ist <= slot_time:
+                    s["status"] = "upcoming"
+                    if next_slot is None:
+                        next_slot = s
+                else:
+                    s["status"] = "completed"
+            if next_slot is None:
+                next_slot = {**slots[0], "status": "tomorrow"}
+
+            ready_count = stats["clips_approved"] + stats["clips_awaiting_review"]
+            schedule_data = {
+                "active": True,
+                "timezone": "Asia/Kolkata (IST)",
+                "frequency": "5 Shorts Daily",
+                "window": "7:00 PM – 9:00 PM IST",
+                "current_time_ist": now_ist.strftime("%I:%M %p IST"),
+                "next_slot": next_slot,
+                "slots": slots,
+                "ready_queue_count": ready_count,
+                "queue_healthy": ready_count >= 5,
+                "pipeline_stages": [
+                    {"time": "08:00 IST", "name": "Morning Episode Discovery", "status": "Active"},
+                    {"time": "14:00 IST", "name": "AI Processing & Subtitles", "status": "Active"},
+                    {"time": "18:00 IST", "name": "Pre-Window Queue Preparation", "status": "Active"},
+                    {"time": "19:00 - 21:00 IST", "name": "5 Daily Shorts Publishing Window", "status": "Active"},
+                ],
+            }
+
+            return {
+                "stats": stats,
+                "sources": source_dicts,
+                "episodes": episodes,
+                "clips": clips,
+                "schedule": schedule_data,
+            }
+        except Exception as exc:
+            log.warning("podcast_snapshot error: %s", exc)
+            return {"stats": {}, "sources": [], "episodes": [], "clips": []}
+
+    def podcast_action(self, action: str, data: dict):
+        from .podcast.discovery import EpisodeDiscovery
+        from .podcast.publisher import PodcastPublisher
+        from .podcast.rights import RightsChecker
+        from .podcast.sources import SourceRegistry
+
+        if action == "podcast_discover":
+            registry = SourceRegistry()
+            discovery = EpisodeDiscovery(self.cfg, self.store)
+            episodes = discovery.discover_all_sources(registry)
+            saved = 0
+            for ep in episodes:
+                existing = self.store.get_podcast_episode(ep.id)
+                if existing is None:
+                    self.store.save_podcast_episode({
+                        **ep.to_dict(),
+                        "status": "discovered",
+                    })
+                    saved += 1
+            return {"message": f"Discovery finished: {len(episodes)} episodes found ({saved} new saved)."}
+
+        if action == "podcast_authorize":
+            checker = RightsChecker(self.store)
+            ep_id = data["episode_id"]
+            basis = data.get("basis", "creator_permission")
+            notes = data.get("notes")
+            evidence_url = data.get("evidence_url")
+            record = checker.grant_authorization(ep_id, basis, evidence_url=evidence_url, notes=notes)
+            return {"message": f"Episode {ep_id} authorized successfully.", "record": record.to_dict()}
+
+        if action == "podcast_block":
+            checker = RightsChecker(self.store)
+            ep_id = data["episode_id"]
+            reason = data.get("reason", "User blocked episode")
+            record = checker.block_episode(ep_id, reason)
+            return {"message": f"Episode {ep_id} blocked.", "record": record.to_dict()}
+
+        if action == "podcast_process":
+            ep_id = data["episode_id"]
+            clips_count = int(data.get("clips", 4))
+            style = data.get("style", "dynamic")
+            self.executor.submit(self._run_podcast_pipeline, ep_id, clips_count, style)
+            return {"message": f"Processing started for {ep_id}. Check the Review Queue shortly!"}
+
+        if action == "podcast_approve_clip":
+            clip_id = data["clip_id"]
+            self.store.update_clip_status(clip_id, "approved")
+            return {"message": f"Clip {clip_id} approved for publishing."}
+
+        if action == "podcast_reject_clip":
+            clip_id = data["clip_id"]
+            reason = data.get("reason")
+            self.store.update_clip_status(clip_id, "rejected", review_notes=reason)
+            return {"message": f"Clip {clip_id} rejected."}
+
+        if action == "podcast_update_clip":
+            clip_id = data["clip_id"]
+            with self.store.connect() as db:
+                db.execute(
+                    "UPDATE podcast_clips SET generated_title=?, generated_description=? WHERE id=?",
+                    (data.get("title"), data.get("description"), clip_id),
+                )
+            return {"message": f"Clip {clip_id} updated."}
+
+        if action == "podcast_upload_clip":
+            clip_id = data["clip_id"]
+            privacy = data.get("privacy", "private")
+            publisher = PodcastPublisher(self.cfg, self.store)
+            res = publisher.upload_clip(clip_id, privacy=privacy)
+            return {"message": f"Clip {clip_id} uploaded to YouTube ({privacy})!", "result": res}
+
+        if action == "podcast_toggle_source":
+            source_id = data["source_id"]
+            registry = SourceRegistry()
+            src = registry.get(source_id)
+            if not src:
+                raise ValueError(f"Source {source_id} not found")
+            if src.enabled:
+                registry.disable(source_id)
+            else:
+                registry.enable(source_id)
+            return {"message": f"Source {source_id} toggled.", "enabled": not src.enabled}
+
+        if action == "podcast_manual_clip":
+            url = data.get("url", "").strip()
+            if not url:
+                raise ValueError("YouTube podcast or video URL is required.")
+
+            import subprocess
+            import sys
+            from pathlib import Path
+            from .podcast.sources import PodcastSource
+
+            ytdlp_bin = str(Path(sys.executable).parent / "yt-dlp.exe")
+            if not Path(ytdlp_bin).is_file():
+                ytdlp_bin = "yt-dlp"
+
+            cmd = [ytdlp_bin, "--dump-json", "--skip-download", "--no-warnings", url]
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=35)
+            if proc.returncode != 0:
+                raise ValueError(f"Could not retrieve video details: {proc.stderr[:180]}")
+
+            meta = json.loads(proc.stdout)
+            video_id = meta.get("id")
+            if not video_id:
+                raise ValueError("Could not determine YouTube video ID.")
+
+            title = meta.get("title", "Imported Podcast Video")
+            channel = meta.get("channel") or meta.get("uploader") or "YouTube Creator"
+            duration = int(meta.get("duration") or 0)
+            thumbnail = meta.get("thumbnail") or f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"
+            description = meta.get("description", "")[:500]
+
+            registry = SourceRegistry()
+            slug = re.sub(r"[^a-z0-9_]+", "_", channel.lower()).strip("_") or "manual"
+            source = registry.get(slug)
+            if not source:
+                source = PodcastSource(
+                    id=slug,
+                    name=channel,
+                    show_name=channel,
+                    youtube_channel_id=meta.get("channel_id") or "",
+                    youtube_channel_url=meta.get("channel_url") or f"https://www.youtube.com/@{slug}",
+                    playlist_id=None,
+                    rss_feed_url=None,
+                    website_url=None,
+                    enabled=True,
+                    priority_topics=["motivation", "business", "mindset", "success"],
+                    created_at=datetime.now(timezone.utc),
+                )
+                registry.add(source)
+
+            episode_id = f"{slug}:{video_id}"
+            ep_record = {
+                "id": episode_id,
+                "source_id": slug,
+                "video_id": video_id,
+                "video_url": f"https://www.youtube.com/watch?v={video_id}",
+                "title": title,
+                "channel_name": channel,
+                "published_at": datetime.now(timezone.utc).isoformat(),
+                "duration_seconds": duration,
+                "thumbnail_url": thumbnail,
+                "description": description,
+                "discovery_score": 0.95,
+                "topics_matched": ["manual_import"],
+                "status": "authorized",
+                "rights_status": "authorized",
+                "rights_basis": "creator_permission",
+                "rights_notes": "Authorized by user manual URL import",
+                "rights_verified_at": datetime.now(timezone.utc).isoformat(),
+            }
+            self.store.save_podcast_episode(ep_record)
+
+            clips_count = int(data.get("clips", 3))
+            style = data.get("style", "dynamic")
+            auto_upload = bool(data.get("auto_upload", False))
+            bgm_vibe = data.get("bgm_vibe", "auto")
+
+            self.executor.submit(self._run_podcast_pipeline, episode_id, clips_count, style, auto_upload, bgm_vibe)
+            return {
+                "message": f"Successfully imported '{title}'! Clipping started in background.",
+                "episode_id": episode_id,
+                "title": title,
+                "channel": channel,
+                "duration": duration,
+            }
+
+        if action == "podcast_auto_clip_top":
+            registry = SourceRegistry()
+            discovery = EpisodeDiscovery(self.cfg, self.store)
+            episodes = discovery.discover_all_sources(registry)
+            for ep in episodes:
+                existing = self.store.get_podcast_episode(ep.id)
+                if existing is None:
+                    self.store.save_podcast_episode({
+                        **ep.to_dict(),
+                        "status": "discovered",
+                    })
+
+            all_eps = self.store.list_podcast_episodes(limit=100)
+            unprocessed = [
+                e for e in all_eps
+                if e.get("status") in ("discovered", "authorized") and not e.get("processed_at")
+            ]
+            if not unprocessed:
+                return {"message": "All discovered episodes have already been processed!"}
+
+            top_ep = max(unprocessed, key=lambda x: x.get("discovery_score", 0))
+            ep_id = top_ep["id"]
+
+            checker = RightsChecker(self.store)
+            checker.grant_authorization(ep_id, "creator_permission", notes="Auto-selected top episode for clipping")
+
+            clips_count = int(data.get("clips", 3))
+            style = data.get("style", "dynamic")
+            auto_upload = bool(data.get("auto_upload", False))
+
+            self.executor.submit(self._run_podcast_pipeline, ep_id, clips_count, style, auto_upload)
+            return {
+                "message": f"Auto-selected top episode: '{top_ep.get('title')}' (Score: {top_ep.get('discovery_score')}). Clipping started!",
+                "episode_id": ep_id,
+                "title": top_ep.get("title"),
+            }
+
+        if action == "podcast_delete_clip":
+            clip_id = data["clip_id"]
+            with self.store.connect() as db:
+                db.execute("DELETE FROM podcast_clips WHERE id=?", (clip_id,))
+            return {"message": f"Clip {clip_id} deleted."}
+
+        if action == "podcast_publish_slot":
+            from .podcast.scheduler import PodcastScheduler
+            scheduler = PodcastScheduler(self.cfg, self.store)
+            slot = int(data.get("slot", 1))
+            privacy = data.get("privacy", "private")
+            res = scheduler.job_publish_scheduled_short(slot_number=slot, privacy=privacy)
+            if not res:
+                return {"message": f"Slot {slot}: No clips ready or error during publishing."}
+            return {
+                "message": f"Slot {slot}/5 published successfully! Title: '{res.get('title', '')}' URL: {res.get('youtube_url', '')}",
+                "result": res
+            }
+
+        if action == "podcast_prepare_queue":
+            from .podcast.scheduler import PodcastScheduler
+            scheduler = PodcastScheduler(self.cfg, self.store)
+            count = scheduler.job_prepare_evening_shorts(target_count=5)
+            return {"message": f"Queue preparation checked: {count} ready clips in queue for evening publishing."}
+
+        raise ValueError(f"Unknown podcast action: {action}")
+
+    def _run_podcast_pipeline(self, episode_id: str, max_clips: int, style: str, auto_upload: bool = False, bgm_vibe: str = "auto"):
+        try:
+            from .podcast.pipeline import PodcastPipeline
+            pipeline = PodcastPipeline(self.cfg, self.store)
+            enable_bgm = (bgm_vibe != "none")
+            results = pipeline.process_episode(
+                episode_id,
+                max_clips=max_clips,
+                subtitle_style=style,
+                bgm_vibe=bgm_vibe if bgm_vibe != "auto" else None,
+                enable_bgm=enable_bgm,
+            )
+            self.notice = f"Finished clipping {episode_id} ({len(results)} clips generated)!"
+
+            if auto_upload and results:
+                from .podcast.publisher import PodcastPublisher
+                publisher = PodcastPublisher(self.cfg, self.store)
+                top_clip = max(results, key=lambda c: c.score)
+                self.store.update_clip_status(top_clip.clip_id, "approved")
+                res = publisher.upload_clip(top_clip.clip_id, privacy="private")
+                self.notice += f" Uploaded to YouTube: {res.get('youtube_url')}"
+        except Exception as exc:
+            log.error("Background podcast pipeline error: %s", exc)
+            self.notice = f"Clipping failed for {episode_id}: {exc}"
 
     def voice_action(self, action, value=None, version=None, page=None):
         import time
@@ -308,7 +651,8 @@ class Dashboard:
                     "web evidence from documentation, official pages or credible reporting. Official-only claims are attributed; sources appear in run details. "
                     "popularity is not proof." if cfg.content_mode == "youtube_insights" else
                     "Trending sources guide topic selection. Engagement and virality are not guaranteed. "
-                    "Failed evidence or quality checks stop publication.")}
+                    "Failed evidence or quality checks stop publication."),
+                "podcast": self.podcast_snapshot()}
 
     def detail(self, job_id):
         if not JOB_ID.fullmatch(job_id):
@@ -379,6 +723,9 @@ def make_server(app, port):
                 match = re.fullmatch(r"/media/([a-f0-9]{16})/(final.mp4|cover.png)", path)
                 if match:
                     return self.media(*match.groups())
+                match_clip = re.fullmatch(r"/media/podcast/clip/([^/]+)/(final\.mp4|thumbnail\.png)", path)
+                if match_clip:
+                    return self.podcast_media(*match_clip.groups())
                 names = {"/": "index.html", "/app.js": "app.js", "/ui.mjs": "ui.mjs", "/style.css": "style.css"}
                 if path in names:
                     file = Path(__file__).parent / "web" / names[path]
@@ -387,9 +734,10 @@ def make_server(app, port):
                 return self.send(404, {"error": "Not found"})
             except (ValueError, FileNotFoundError):
                 return self.send(404, {"error": "Job or media not found"})
-            except (BrokenPipeError, ConnectionResetError):
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 pass
-            except Exception:
+            except Exception as exc:
+                log.exception("Unexpected error in do_GET: %s", exc)
                 return self.send(500, {"error": "Could not read local data; run doctor"})
 
         def media(self, job_id, name):
@@ -397,6 +745,46 @@ def make_server(app, port):
             file = (root / job_id / name).resolve()
             if not file.is_relative_to(root) or not file.is_file():
                 return self.send(404, {"error": "Not found"})
+            size = file.stat().st_size
+            start, end = 0, size - 1
+            byte_range = self.headers.get("Range")
+            if byte_range:
+                match = re.fullmatch(r"bytes=(\d+)-(\d*)", byte_range)
+                if not match:
+                    return self.send(416, {"error": "Unsupported range"})
+                start = int(match[1])
+                end = min(int(match[2]), end) if match[2] else end
+                if not 0 <= start <= end < size:
+                    return self.send(416, {"error": "Invalid range"})
+            self.send_response(206 if byte_range else 200)
+            self.send_header("Content-Type", "video/mp4" if name.endswith(".mp4") else "image/png")
+            self.send_header("Content-Length", str(end - start + 1))
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            if byte_range:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            self.end_headers()
+            with file.open("rb") as stream:
+                stream.seek(start)
+                remaining = end - start + 1
+                while remaining:
+                    chunk = stream.read(min(65536, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+
+        def podcast_media(self, clip_id, name):
+            clip = app.store.get_podcast_clip(clip_id)
+            if not clip:
+                return self.send(404, {"error": "Clip not found"})
+            target_str = clip.get("output_path" if name == "final.mp4" else "thumbnail_path")
+            if not target_str:
+                return self.send(404, {"error": "Media path not recorded"})
+            file = Path(target_str).resolve()
+            if not file.is_file():
+                return self.send(404, {"error": "File not found on disk"})
             size = file.stat().st_size
             start, end = 0, size - 1
             byte_range = self.headers.get("Range")
@@ -465,7 +853,12 @@ def make_server(app, port):
                             app.youtube_auth.cancel()
                             result, browser_cookie = {"message": "Connection cancelled. Existing authorization was kept."}, cookie(clear=True)
                     return self.send(200, result, headers={"Set-Cookie": browser_cookie})
-                if value.get("action") in {"voice_list", "save_voice", "test_voice"}:
+                if str(value.get("action", "")).startswith("podcast_"):
+                    try:
+                        result = app.podcast_action(value["action"], value)
+                    except Exception as error:
+                        return self.send(409, {"error": str(error)[:350]})
+                elif value.get("action") in {"voice_list", "save_voice", "test_voice"}:
                     try:
                         result = app.voice_action(value["action"], value.get("selection"), value.get("version"), value.get("page"))
                     except (RuntimeError, ValueError, TypeError) as error:

@@ -1,15 +1,15 @@
 import json
 from datetime import datetime
-from zoneinfo import ZoneInfo
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import httplib2
 import pytest
 from googleapiclient.errors import HttpError
-
-from autoyt import youtube, scheduling
-from autoyt.store import Store, digest, write_json
 from test_youtube import FakeYouTube, UploadRequest, install_fake
+
+from autoyt import scheduling, youtube
+from autoyt.store import Store, digest, write_json
 
 
 @pytest.fixture
