@@ -57,6 +57,8 @@ class Dashboard:
         self.scheduler_owned = False
         from .youtube_oauth import YouTubeOAuth
         self.youtube_auth = YouTubeOAuth(cfg)
+        from .podcast.scheduler import PodcastScheduler
+        self.podcast_scheduler = PodcastScheduler(cfg, self.store)
 
     def podcast_snapshot(self):
         try:
@@ -542,6 +544,8 @@ class Dashboard:
             if self.state_path.is_file():
                 enabled = json.loads(self.state_path.read_text(encoding="utf-8"))["enabled"] is True
             self.scheduler.start(paused=not enabled)
+            if enabled and hasattr(self, "podcast_scheduler") and self.podcast_scheduler:
+                self.podcast_scheduler.start()
             if enabled and self.cfg.daily_script_batch and os.environ.get("LOOPYT_STARTUP_PLAN") == "1":
                 self.queue_missing_plan()
         except Exception:
@@ -557,6 +561,11 @@ class Dashboard:
     def close(self):
         if self.scheduler.running:
             self.scheduler.shutdown(wait=True)
+        if hasattr(self, "podcast_scheduler") and self.podcast_scheduler and self.podcast_scheduler.scheduler.running:
+            try:
+                self.podcast_scheduler.scheduler.shutdown(wait=False)
+            except Exception:
+                pass
         self.executor.shutdown(wait=True)
         if self.scheduler_owned:
             self.scheduler_lock.release()
@@ -612,10 +621,17 @@ class Dashboard:
                 write_json(self.state_path, {"enabled": enabled})
                 if enabled:
                     self.scheduler.resume()
+                    if hasattr(self, "podcast_scheduler") and self.podcast_scheduler:
+                        if not self.podcast_scheduler.scheduler.running:
+                            self.podcast_scheduler.start()
+                        else:
+                            self.podcast_scheduler.scheduler.resume()
                     if self.cfg.daily_script_batch and os.environ.get("LOOPYT_STARTUP_PLAN") == "1":
                         self.queue_missing_plan()
                 else:
                     self.scheduler.pause()
+                    if hasattr(self, "podcast_scheduler") and self.podcast_scheduler and self.podcast_scheduler.scheduler.running:
+                        self.podcast_scheduler.scheduler.pause()
                 return {"message": "Auto mode resumed" if enabled else "Auto mode paused; current work can finish"}
             if action not in ("run", "preview", "retry"):
                 raise ValueError("Unknown action")
