@@ -230,6 +230,10 @@ class PodcastPipeline:
                     )
                 )
 
+            # 6. Automatic cleanup of large raw source video to save disk space
+            freed = self.acquisition.cleanup(episode_id, keep_transcript=True)
+            log.info("Episode %s raw media cleanup: freed %.1f MB disk space", episode_id, freed / 1024 / 1024)
+
             self.store.update_episode_status(episode_id, "processed")
             log.info("Finished processing episode %s: generated %d clips", episode_id, len(results))
             return results

@@ -167,3 +167,35 @@ class MediaAcquisition:
             return float(proc.stdout.strip())
         except Exception:
             return 0.0
+
+    def cleanup(self, episode_id: str, keep_transcript: bool = True) -> int:
+        """Delete large raw downloaded video and audio files for an episode to save disk space.
+
+        Returns total bytes freed.
+        """
+        safe_id = episode_id.replace(":", "_").replace("/", "_")
+        dest_dir = self.base_dir / safe_id
+        if not dest_dir.is_dir():
+            return 0
+
+        bytes_freed = 0
+        for pattern in ("source.mp4*", "audio_16k.wav*", "*.part", "*.ytdl"):
+            for f in dest_dir.glob(pattern):
+                try:
+                    if f.is_file():
+                        sz = f.stat().st_size
+                        f.unlink()
+                        bytes_freed += sz
+                        log.info("Cleaned up raw episode file: %s (%.1f MB freed)", f.name, sz / 1024 / 1024)
+                except Exception as exc:
+                    log.warning("Could not delete raw file %s: %s", f, exc)
+
+        if not keep_transcript:
+            for f in dest_dir.glob("transcript.json*"):
+                try:
+                    bytes_freed += f.stat().st_size
+                    f.unlink()
+                except Exception:
+                    pass
+
+        return bytes_freed
