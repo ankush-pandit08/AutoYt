@@ -59,6 +59,8 @@ class Dashboard:
         self.youtube_auth = YouTubeOAuth(cfg)
         from .podcast.scheduler import PodcastScheduler
         self.podcast_scheduler = PodcastScheduler(cfg, self.store)
+        from .subtitles_studio import SubtitlesStudio
+        self.subtitles_studio = SubtitlesStudio()
 
     def podcast_snapshot(self):
         try:
@@ -133,12 +135,20 @@ class Dashboard:
                 ],
             }
 
+            from .subtitles_studio import FONTS_CATALOG, STYLES_CATALOG
+            subtitles_data = {
+                "fonts": FONTS_CATALOG,
+                "styles": STYLES_CATALOG,
+                "jobs": self.subtitles_studio.list_jobs(),
+            }
+
             return {
                 "stats": stats,
                 "sources": source_dicts,
                 "episodes": episodes,
                 "clips": clips,
                 "schedule": schedule_data,
+                "subtitles_studio": subtitles_data,
             }
         except Exception as exc:
             log.warning("podcast_snapshot error: %s", exc)
@@ -149,6 +159,24 @@ class Dashboard:
         from .podcast.publisher import PodcastPublisher
         from .podcast.rights import RightsChecker
         from .podcast.sources import SourceRegistry
+
+        if action == "subtitles_process":
+            job_id = data.get("job_id")
+            if not job_id:
+                raise ValueError("job_id is required")
+            res = self.subtitles_studio.process_subtitles(
+                job_id=job_id,
+                font=data.get("font", "Arial Black"),
+                style_key=data.get("style_key", "hormozi_yellow"),
+                position=data.get("position", "middle"),
+                chunk_size=int(data.get("chunk_size", 3)),
+                text_case=data.get("text_case", "upper"),
+                font_size=int(data.get("font_size", 76)),
+            )
+            return {"message": "Subtitles generated and burned into video successfully!", "job": res}
+
+        if action == "subtitles_list":
+            return {"jobs": self.subtitles_studio.list_jobs()}
 
         if action == "podcast_discover":
             registry = SourceRegistry()
@@ -289,9 +317,9 @@ class Dashboard:
                 raise ValueError("source_id is required.")
             registry = SourceRegistry()
             success = registry.remove(source_id)
-            if not success:
-                raise ValueError(f"Source {source_id} not found.")
-            return {"message": f"Source '{source_id}' removed.", "source_id": source_id}
+            with self.store.connect() as db:
+                db.execute("DELETE FROM podcast_episodes WHERE source_id=?", (source_id,))
+            return {"message": f"Source '{source_id}' removed and episodes purged.", "source_id": source_id}
 
         if action == "podcast_scan_source":
             source_id = data.get("source_id")
@@ -826,6 +854,9 @@ def make_server(app, port):
                 match_clip = re.fullmatch(r"/media/podcast/clip/([^/]+)/(final\.mp4|thumbnail\.png)", path)
                 if match_clip:
                     return self.podcast_media(*match_clip.groups())
+                match_sub = re.fullmatch(r"/media/subtitles_studio/([^/]+)/(subtitled\.mp4|thumbnail\.png|input\.[a-z0-9]+)", path)
+                if match_sub:
+                    return self.subtitles_media(*match_sub.groups())
                 names = {"/": "index.html", "/app.js": "app.js", "/ui.mjs": "ui.mjs", "/style.css": "style.css"}
                 if path in names:
                     file = Path(__file__).parent / "web" / names[path]
@@ -862,6 +893,42 @@ def make_server(app, port):
             self.send_header("Accept-Ranges", "bytes")
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
+            if byte_range:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            self.end_headers()
+            with file.open("rb") as stream:
+                stream.seek(start)
+                remaining = end - start + 1
+                while remaining:
+                    chunk = stream.read(min(65536, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+
+        def subtitles_media(self, job_id, name):
+            file = (app.subtitles_studio.base_dir / job_id / name).resolve()
+            if not file.is_file():
+                return self.send(404, {"error": "Media not found"})
+            size = file.stat().st_size
+            start, end = 0, size - 1
+            byte_range = self.headers.get("Range")
+            if byte_range:
+                match = re.fullmatch(r"bytes=(\d+)-(\d*)", byte_range)
+                if not match:
+                    return self.send(416, {"error": "Unsupported range"})
+                start = int(match[1])
+                end = min(int(match[2]), end) if match[2] else end
+                if not 0 <= start <= end < size:
+                    return self.send(416, {"error": "Invalid range"})
+            self.send_response(206 if byte_range else 200)
+            self.send_header("Content-Type", "video/mp4" if name.endswith(".mp4") else "image/png")
+            self.send_header("Content-Length", str(end - start + 1))
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            if "download=1" in urlsplit(self.path).query:
+                self.send_header("Content-Disposition", f'attachment; filename="subtitled_{job_id}.mp4"')
             if byte_range:
                 self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
             self.end_headers()
@@ -915,17 +982,61 @@ def make_server(app, port):
                     self.wfile.write(chunk)
                     remaining -= len(chunk)
 
+        def subtitles_media(self, job_id, name):
+            file = (app.subtitles_studio.base_dir / job_id / name).resolve()
+            if not file.is_file():
+                return self.send(404, {"error": "Media not found"})
+            size = file.stat().st_size
+            start, end = 0, size - 1
+            byte_range = self.headers.get("Range")
+            if byte_range:
+                match = re.fullmatch(r"bytes=(\d+)-(\d*)", byte_range)
+                if not match:
+                    return self.send(416, {"error": "Unsupported range"})
+                start = int(match[1])
+                end = min(int(match[2]), end) if match[2] else end
+                if not 0 <= start <= end < size:
+                    return self.send(416, {"error": "Invalid range"})
+            self.send_response(206 if byte_range else 200)
+            self.send_header("Content-Type", "video/mp4" if name.endswith(".mp4") else "image/png")
+            self.send_header("Content-Length", str(end - start + 1))
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            if "download=1" in urlsplit(self.path).query:
+                self.send_header("Content-Disposition", f'attachment; filename="subtitled_{job_id}.mp4"')
+            if byte_range:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            self.end_headers()
+            with file.open("rb") as stream:
+                stream.seek(start)
+                remaining = end - start + 1
+                while remaining:
+                    chunk = stream.read(min(65536, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+
         def do_POST(self):
             origin = self.headers.get("Origin")
             allowed_origins = {f"http://127.0.0.1:{self.server.server_port}", f"http://localhost:{self.server.server_port}"}
             if not self.allowed() or origin not in allowed_origins or not hmac.compare_digest(
                     self.headers.get("X-AutoYT-Token", ""), app.token):
                 return self.send(403, {"error": "Open the dashboard on localhost to use controls"})
-            if self.path not in ("/api/action", "/api/creative/import"):
+            if self.path not in ("/api/action", "/api/creative/import", "/api/subtitles/upload"):
                 return self.send(404, {"error": "Not found"})
             value = {}
             try:
                 length = int(self.headers.get("Content-Length", "0"))
+                if self.path == "/api/subtitles/upload":
+                    if not 0 < length <= 250_000_000:
+                        raise ValueError("Upload file size must be between 1 byte and 250MB")
+                    filename = self.headers.get("X-Filename", "video.mp4")
+                    file_bytes = self.rfile.read(length)
+                    job_id = app.subtitles_studio.save_uploaded_file(file_bytes, filename)
+                    return self.send(200, {"job_id": job_id, "filename": filename, "message": "Video uploaded successfully!"})
+
                 if not 0 < length <= (11_000_000 if self.path == "/api/creative/import" else 32768):
                     raise ValueError("Invalid request size")
                 value = json.loads(self.rfile.read(length))
@@ -953,7 +1064,7 @@ def make_server(app, port):
                             app.youtube_auth.cancel()
                             result, browser_cookie = {"message": "Connection cancelled. Existing authorization was kept."}, cookie(clear=True)
                     return self.send(200, result, headers={"Set-Cookie": browser_cookie})
-                if str(value.get("action", "")).startswith("podcast_"):
+                if str(value.get("action", "")).startswith("podcast_") or str(value.get("action", "")).startswith("subtitles_"):
                     try:
                         result = app.podcast_action(value["action"], value)
                     except Exception as error:

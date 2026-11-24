@@ -131,9 +131,12 @@ function renderDashboard() {
 
   // 6. Render Daily 5-Shorts Automation Schedule
   renderAutomationSchedule(state?.podcast?.schedule);
+
+  // 7. Render Captions Studio History
+  renderSubtitlesHistory(state?.podcast?.subtitles_studio?.jobs || []);
 }
 
-// Render Clips Grid
+// Render Clips Grid (Compact Minimized Box Layout)
 function renderClipsGallery(clips) {
   const container = $('clipsGrid');
   const filtered = clips.filter(c => {
@@ -161,42 +164,55 @@ function renderClipsGallery(clips) {
     const dur = formatDuration(clip.duration_seconds);
 
     return `
-      <div class="clip-card" data-clip-id="${esc(clip.id)}">
-        <div class="clip-media-box" data-id="${esc(clip.id)}" title="Click to preview video in Cinema player">
-          <img src="/media/podcast/clip/${esc(clip.id)}/thumbnail.png" alt="Short preview" class="clip-poster" loading="lazy">
-          <div class="play-overlay">
-            <div class="play-circle">▶</div>
-            <span class="play-caption">Play Preview</span>
-          </div>
-          <span class="clip-score-badge">★ ${score}</span>
-          <span class="clip-duration-badge">⏱ ${dur}</span>
-          <div class="clip-status-banner">
+      <div class="clip-box" data-clip-id="${esc(clip.id)}">
+        <!-- Compact Preview Thumbnail -->
+        <div class="clip-mini-thumb-wrap clip-media-box" data-id="${esc(clip.id)}" title="Click to preview video">
+          <img src="/media/podcast/clip/${esc(clip.id)}/thumbnail.png" alt="Preview" class="clip-mini-thumb" loading="lazy">
+          <div class="clip-mini-play">▶</div>
+        </div>
+
+        <!-- Main Info Box -->
+        <div class="clip-box-main">
+          <div class="clip-box-title-row">
+            <h4 class="clip-box-title" title="${esc(clip.generated_title || 'Untitled Short')}">
+              ${esc(clip.generated_title || 'Untitled Short')}
+            </h4>
             <span class="badge badge-${esc(clip.status || 'candidate')}">${esc(clip.status || 'candidate')}</span>
+          </div>
+
+          <div class="clip-box-meta-row">
+            <span class="meta-item">🎙️ ${esc(clip.source_id || 'Podcast')} • #${esc(clip.clip_index || 1)}</span>
+            <span class="meta-sep">•</span>
+            <span class="meta-item">⏱ ${dur}</span>
+            <span class="meta-sep">•</span>
+            <span class="meta-item meta-score">★ ${score}/100</span>
+            ${ytUrl ? `
+              <span class="meta-sep">•</span>
+              <a href="${esc(ytUrl)}" target="_blank" rel="noopener noreferrer" class="clip-box-yt-link" title="Open YouTube Shorts in new tab">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="#ef4444"><path d="M10 15l5-3-5-3v6z"/><path d="M21.58 7.19a2.7 2.7 0 0 0-1.9-1.9C18 4.8 12 4.8 12 4.8s-6 0-7.68.49a2.7 2.7 0 0 0-1.9 1.9C2 8.87 2 12 2 12s0 3.13.42 4.81a2.7 2.7 0 0 0 1.9 1.9c1.68.49 7.68.49 7.68.49s6 0 7.68-.49a2.7 2.7 0 0 0 1.9-1.9C22 15.13 22 12 22 12s0-3.13-.42-4.81zM10 15V9l5 3-5 3z"/></svg>
+                ${esc(clip.youtube_video_id ? 'shorts/' + clip.youtube_video_id : 'Watch on YouTube')} ↗
+              </a>
+            ` : ''}
           </div>
         </div>
 
-        <div class="clip-info">
-          <span class="clip-creator">🎙️ ${esc(clip.source_id || 'Podcast')} • Clip #${esc(clip.clip_index || 1)}</span>
-          <h4 class="clip-title" title="${esc(clip.generated_title || 'Untitled Short')}">
-            ${esc(clip.generated_title || 'Untitled Short')}
-          </h4>
-
-          <div class="clip-actions">
-            ${isUploaded ? `
-              <a href="${esc(ytUrl)}" target="_blank" rel="noopener noreferrer" class="clip-yt-link">
-                ▶ View on YouTube Shorts ↗
-              </a>
-            ` : `
-              <button class="btn btn-secondary btn-sm edit-clip-btn" data-id="${esc(clip.id)}">✨ Preview</button>
-              ${isCandidate ? `
-                <button class="btn btn-success btn-sm approve-clip-btn" data-id="${esc(clip.id)}">✓ Approve</button>
-              ` : ''}
-              ${isApproved ? `
-                <button class="btn btn-primary btn-sm upload-clip-btn btn-full" data-id="${esc(clip.id)}">🚀 Upload to YouTube</button>
-              ` : ''}
-            `}
-            <button class="btn btn-secondary btn-sm delete-clip-btn" data-id="${esc(clip.id)}" title="Delete Clip">Delete</button>
-          </div>
+        <!-- Compact Actions -->
+        <div class="clip-box-actions">
+          <button class="btn btn-secondary btn-sm edit-clip-btn" data-id="${esc(clip.id)}" title="Preview video">
+            ▶ Preview
+          </button>
+          ${isUploaded ? `
+            <a href="${esc(ytUrl)}" target="_blank" rel="noopener noreferrer" class="btn btn-danger btn-sm" title="View on YouTube">
+              YouTube ↗
+            </a>
+          ` : ''}
+          ${isCandidate ? `
+            <button class="btn btn-success btn-sm approve-clip-btn" data-id="${esc(clip.id)}">✓ Approve</button>
+          ` : ''}
+          ${isApproved ? `
+            <button class="btn btn-primary btn-sm upload-clip-btn" data-id="${esc(clip.id)}">🚀 Upload</button>
+          ` : ''}
+          <button class="btn btn-secondary btn-sm delete-clip-btn" data-id="${esc(clip.id)}" title="Delete Clip">✕</button>
         </div>
       </div>
     `;
@@ -346,6 +362,7 @@ function renderAutomationSchedule(schedule) {
 // NAVIGATION TABS
 const tabTitles = {
   clipsStudio: ['Channel overview & Clips Studio', 'Review AI-extracted 9:16 vertical Shorts and publish to YouTube in private mode'],
+  captionsStudio: ['Reels & Shorts Captions Studio', 'Upload 60-second video to transcribe and burn animated subtitles with viral creator fonts and styles'],
   automationSchedule: ['Daily Shorts Automation & Schedule', 'Automated background publisher running 5 Shorts every evening between 7:00 PM and 9:00 PM IST'],
   manualCreator: ['Create Shorts Clip', 'Paste any podcast or video URL to automatically extract vertical Shorts with animated captions'],
   episodesFeed: ['Discovered Episodes Feed', 'Podcast episodes discovered from your creators, ranked by topic relevance'],
@@ -359,6 +376,7 @@ function switchTab(tab) {
   });
 
   $('clipsStudioSection').hidden = tab !== 'clipsStudio';
+  $('captionsStudioSection').hidden = tab !== 'captionsStudio';
   $('manualCreatorSection').hidden = tab !== 'manualCreator' && tab !== 'clipsStudio';
   $('episodesFeedSection').hidden = tab !== 'episodesFeed';
   $('sourcesSettingsSection').hidden = tab !== 'sourcesSettings';
@@ -907,6 +925,247 @@ $('btnRefreshSchedule').onclick = async () => {
   toast('Refreshing schedule and queue status...', 'info');
   await refresh();
 };
+
+// CAPTIONS STUDIO ENGINE
+let uploadedVideoJobId = null;
+
+function renderSubtitlesHistory(jobs) {
+  const container = $('subtitlesHistoryList');
+  if (!container) return;
+  if (!jobs || !jobs.length) {
+    container.innerHTML = `<p class="table-loading">No uploaded shorts subtitled yet.</p>`;
+    return;
+  }
+  container.innerHTML = jobs.map(j => {
+    const isReady = j.status === 'ready';
+    const dur = j.duration ? formatDuration(j.duration) : '--';
+    return `
+      <div class="clip-box" data-job-id="${esc(j.id)}">
+        <div class="clip-mini-thumb-wrap ${isReady ? 'preview-sub-thumb' : ''}" data-video-url="${esc(j.video_url || '')}">
+          ${j.thumb_url ? `<img src="${esc(j.thumb_url)}" alt="Preview" class="clip-mini-thumb" loading="lazy">` : '<div style="background:#000;width:100%;height:100%"></div>'}
+          <div class="clip-mini-play">▶</div>
+        </div>
+
+        <div class="clip-box-main">
+          <div class="clip-box-title-row">
+            <h4 class="clip-box-title">${esc(j.filename || 'Subtitled Reel')}</h4>
+            <span class="badge ${isReady ? 'badge-success' : 'badge-candidate'}">${esc(j.status || 'processing')}</span>
+          </div>
+          <div class="clip-box-meta-row">
+            <span class="meta-item">🔤 ${esc(j.font || 'Default Font')}</span>
+            <span class="meta-sep">•</span>
+            <span class="meta-item">🎨 ${esc(j.style_key || 'Style')}</span>
+            <span class="meta-sep">•</span>
+            <span class="meta-item">⏱ ${dur}</span>
+            ${j.words_count ? `<span class="meta-sep">•</span><span class="meta-item">${j.words_count} words</span>` : ''}
+          </div>
+        </div>
+
+        <div class="clip-box-actions">
+          ${isReady ? `
+            <button type="button" class="btn btn-secondary btn-sm preview-sub-video-btn" data-video-url="${esc(j.video_url)}" data-thumb-url="${esc(j.thumb_url || '')}">
+              ▶ Preview
+            </button>
+            <a href="${esc(j.download_url)}" class="btn btn-primary btn-sm" download="subtitled_${esc(j.id)}.mp4">
+              ⬇️ Download
+            </a>
+          ` : `
+            <span class="badge badge-candidate">Processing</span>
+          `}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function formatFileSize(bytes) {
+  if (!bytes) return '0 B';
+  const mb = bytes / (1024 * 1024);
+  return `${mb.toFixed(1)} MB`;
+}
+
+function handleVideoFileSelected(file) {
+  if (!file) return;
+  if (!file.type.startsWith('video/') && !file.name.match(/\.(mp4|mov|webm|m4v|mkv)$/i)) {
+    toast('Please select a valid video file (MP4, MOV, WEBM).', 'error');
+    return;
+  }
+  if (file.size > 250 * 1024 * 1024) {
+    toast('Video file exceeds 250MB limit.', 'error');
+    return;
+  }
+
+  $('uploadFileName').textContent = file.name;
+  $('uploadFileSize').textContent = formatFileSize(file.size);
+  $('dropzonePrompt').hidden = true;
+  $('uploadFileInfo').hidden = false;
+  $('captionProgressText').textContent = 'Uploading video file...';
+
+  const uploadBtn = $('btnGenerateCaptions');
+  uploadBtn.disabled = true;
+  uploadBtn.innerHTML = '<span>⏳</span> Uploading...';
+
+  fetch('/api/subtitles/upload', {
+    method: 'POST',
+    headers: {
+      'Content-Type': file.type || 'video/mp4',
+      'X-Filename': encodeURIComponent(file.name),
+      'X-AutoYT-Token': token
+    },
+    body: file
+  })
+  .then(res => {
+    if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+    return res.json();
+  })
+  .then(data => {
+    uploadedVideoJobId = data.job_id;
+    toast('Video uploaded! Choose your font and style, then click Generate.', 'success');
+    $('captionProgressText').textContent = 'Video ready for transcription and subtitle styling.';
+    uploadBtn.disabled = false;
+    uploadBtn.innerHTML = '<span>✨</span> Generate &amp; Burn Subtitles';
+  })
+  .catch(err => {
+    toast(`Upload failed: ${err.message}`, 'error');
+    $('captionProgressText').textContent = `Upload error: ${err.message}`;
+    uploadBtn.disabled = true;
+    uploadBtn.innerHTML = '<span>✨</span> Generate &amp; Burn Subtitles';
+  });
+}
+
+$('btnSelectVideo').onclick = e => {
+  e.stopPropagation();
+  $('videoUploadInput').click();
+};
+
+$('videoDropZone').onclick = e => {
+  if (e.target.id === 'btnChangeVideo' || e.target.closest('#btnChangeVideo')) return;
+  $('videoUploadInput').click();
+};
+
+const topbarUploadBtn = $('topbarUploadVideoBtn');
+if (topbarUploadBtn) {
+  topbarUploadBtn.onclick = () => {
+    switchTab('captionsStudio');
+    setTimeout(() => $('videoUploadInput').click(), 150);
+  };
+}
+
+const heroUploadBtn = $('heroSwitchToUploadBtn');
+if (heroUploadBtn) {
+  heroUploadBtn.onclick = () => {
+    switchTab('captionsStudio');
+    setTimeout(() => $('videoUploadInput').click(), 150);
+  };
+}
+
+$('btnChangeVideo').onclick = () => {
+  $('videoUploadInput').value = '';
+  $('uploadFileInfo').hidden = true;
+  $('dropzonePrompt').hidden = false;
+  $('btnGenerateCaptions').disabled = true;
+  $('captionProgressText').textContent = '';
+  uploadedVideoJobId = null;
+};
+
+const dropZone = $('videoDropZone');
+dropZone.ondragover = e => {
+  e.preventDefault();
+  dropZone.classList.add('dragover');
+};
+dropZone.ondragleave = () => dropZone.classList.remove('dragover');
+dropZone.ondrop = e => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  if (e.dataTransfer.files && e.dataTransfer.files.length) {
+    handleVideoFileSelected(e.dataTransfer.files[0]);
+  }
+};
+$('videoUploadInput').onchange = e => {
+  if (e.target.files && e.target.files.length) {
+    handleVideoFileSelected(e.target.files[0]);
+  }
+};
+
+$('btnGenerateCaptions').onclick = async () => {
+  if (!uploadedVideoJobId) {
+    toast('Please upload a video file first.', 'error');
+    return;
+  }
+
+  const btn = $('btnGenerateCaptions');
+  btn.disabled = true;
+  btn.innerHTML = '<span>⚙️</span> Transcribing &amp; Burning...';
+  $('captionProgressText').textContent = 'AI Whisper is generating word timestamps and burning viral subtitles...';
+
+  const font = $('captionFontSelect').value;
+  const styleKey = $('captionStyleSelect').value;
+  const position = $('captionPositionSelect').value;
+  const chunkSize = parseInt($('captionChunkSelect').value, 10);
+  const fontSize = parseInt($('captionFontSizeSelect').value, 10);
+  const textCase = $('captionCaseSelect').value;
+
+  try {
+    toast('Starting AI transcription and video styling...', 'info');
+    const res = await post({
+      action: 'subtitles_process',
+      job_id: uploadedVideoJobId,
+      font,
+      style_key: styleKey,
+      position,
+      chunk_size: chunkSize,
+      font_size: fontSize,
+      text_case: textCase
+    }, 240000);
+
+    toast('Subtitled video ready!', 'success');
+    $('captionProgressText').textContent = 'Done! Your subtitled video is ready to preview and download.';
+
+    const job = res.job || {};
+    $('captionResultCard').hidden = false;
+    const player = $('captionResultVideoPlayer');
+    player.src = job.video_url;
+    if (job.thumb_url) player.poster = job.thumb_url;
+    player.load();
+
+    $('btnDownloadCaptionedVideo').href = job.download_url;
+    $('btnDownloadCaptionedVideoSecondary').href = job.download_url;
+
+    $('resultFontUsed').textContent = job.font || font;
+    $('resultStyleUsed').textContent = job.style_key || styleKey;
+    $('resultPositionUsed').textContent = job.position || position;
+    $('resultWordsCount').textContent = `${job.words_count || 0} words (${formatDuration(job.duration || 0)})`;
+
+    $('captionResultCard').scrollIntoView({ behavior: 'smooth' });
+    await refresh();
+  } catch (err) {
+    toast(`Failed to burn subtitles: ${err.message}`, 'error');
+    $('captionProgressText').textContent = `Error: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<span>✨</span> Generate &amp; Burn Subtitles';
+  }
+};
+
+$('btnReapplyStyle').onclick = () => {
+  $('captionsStudioSection').scrollIntoView({ behavior: 'smooth' });
+};
+
+// Preview Subtitled Video in Result Card when clicked in history
+document.addEventListener('click', e => {
+  const prevBtn = e.target.closest('.preview-sub-video-btn') || e.target.closest('.preview-sub-thumb');
+  if (prevBtn) {
+    const videoUrl = prevBtn.dataset.videoUrl;
+    if (videoUrl) {
+      $('captionResultCard').hidden = false;
+      const player = $('captionResultVideoPlayer');
+      player.src = videoUrl;
+      player.load();
+      player.play().catch(() => {});
+      $('captionResultCard').scrollIntoView({ behavior: 'smooth' });
+    }
+  }
+});
 
 // INITIALIZATION & PERIODIC REFRESH
 if (window.location.hash) {

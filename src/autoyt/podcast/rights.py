@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
+from .blacklist import is_channel_blocked
+
 log = logging.getLogger(__name__)
 
 
@@ -178,6 +180,17 @@ class RightsChecker:
                 f"Unknown basis '{basis}'. Must be one of: {', '.join(sorted(VALID_BASIS))}"
             )
 
+        ep = self.store.get_podcast_episode(episode_id)
+        if ep:
+            if is_channel_blocked(
+                source_id=ep.get("source_id"),
+                channel_name=ep.get("channel_name"),
+                title=ep.get("title"),
+            ):
+                raise PermissionError(
+                    f"Episode {episode_id} is from a blacklisted channel ({ep.get('channel_name') or ep.get('source_id')}). Authorization denied."
+                )
+
         now = datetime.now(timezone.utc)
         record = RightsRecord(
             episode_id=episode_id,
@@ -262,6 +275,18 @@ class RightsChecker:
         Raises:
             PermissionError: When explicitly blocked (status == BLOCKED).
         """
+        ep = self.store.get_podcast_episode(episode_id)
+        if ep:
+            if is_channel_blocked(
+                source_id=ep.get("source_id"),
+                channel_name=ep.get("channel_name"),
+                title=ep.get("title"),
+            ):
+                return (
+                    False,
+                    f"Episode {episode_id} is from a blacklisted channel ({ep.get('channel_name') or ep.get('source_id')}). Processing blocked.",
+                )
+
         record = self.get_rights(episode_id)
 
         if record is None:

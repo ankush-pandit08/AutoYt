@@ -72,12 +72,15 @@ class ClipEditor:
             crop_x, crop_w, crop_h = self._compute_crop_window(source_video, start_seconds, duration_seconds)
             filters = [
                 f"[0:v]crop={crop_w}:{crop_h}:{crop_x}:0",
-                f"scale={self.target_width}:{self.target_height}:flags=lanczos",
+                f"scale={self.target_width}:{self.target_height}:flags=bicubic",
                 f"fps={self.fps}",
             ]
             if subtitles_ass and subtitles_ass.is_file():
-                ass_escaped = subtitles_ass.resolve().as_posix().replace(":", r"\:")
-                filters.append(f"ass=filename='{ass_escaped}'")
+                try:
+                    rel_ass = Path(subtitles_ass).resolve().relative_to(Path.cwd()).as_posix()
+                except Exception:
+                    rel_ass = subtitles_ass.resolve().as_posix().replace(":", r"\:")
+                filters.append(f"ass='{rel_ass}':fontsdir='data/fonts'")
             v_filter = ",".join(filters) + "[v_out]"
 
         # 2. Audio filter & background music resolution
@@ -110,7 +113,7 @@ class ClipEditor:
         ]
 
         if resolved_music and resolved_music.is_file():
-            cmd.extend(["-stream_loop", "-1", "-i", str(resolved_music)])
+            cmd.extend(["-t", f"{duration_seconds:.3f}", "-stream_loop", "-1", "-i", str(resolved_music)])
 
         cmd.extend([
             "-filter_complex", complex_filter,
@@ -119,6 +122,7 @@ class ClipEditor:
             "-c:v", "libx264",
             "-preset", "fast",
             "-crf", "22",
+            "-threads", "2",
             "-c:a", "aac",
             "-b:a", "192k",
             "-ar", "48000",
@@ -260,14 +264,17 @@ class ClipEditor:
         half_h = self.target_height // 2  # 960
 
         filter_parts = [
-            f"[0:v]crop={crop_w}:{crop_h}:{left_x}:0,scale={self.target_width}:{half_h}:flags=lanczos[top]",
-            f"[0:v]crop={crop_w}:{crop_h}:{right_x}:0,scale={self.target_width}:{half_h}:flags=lanczos[bot]",
+            f"[0:v]crop={crop_w}:{crop_h}:{left_x}:0,scale={self.target_width}:{half_h}:flags=bicubic[top]",
+            f"[0:v]crop={crop_w}:{crop_h}:{right_x}:0,scale={self.target_width}:{half_h}:flags=bicubic[bot]",
             f"[top][bot]vstack=inputs=2[v_split]",
         ]
 
         if subtitles_ass and subtitles_ass.is_file():
-            ass_escaped = subtitles_ass.resolve().as_posix().replace(":", r"\:")
-            filter_parts.append(f"[v_split]ass=filename='{ass_escaped}',fps={self.fps}[v_out]")
+            try:
+                rel_ass = Path(subtitles_ass).resolve().relative_to(Path.cwd()).as_posix()
+            except Exception:
+                rel_ass = subtitles_ass.resolve().as_posix().replace(":", r"\:")
+            filter_parts.append(f"[v_split]ass='{rel_ass}':fontsdir='data/fonts',fps={self.fps}[v_out]")
         else:
             filter_parts.append(f"[v_split]fps={self.fps}[v_out]")
 

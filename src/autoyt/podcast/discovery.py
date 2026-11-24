@@ -13,6 +13,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
+from .blacklist import is_channel_blocked
 from .sources import PodcastSource, SourceRegistry
 
 log = logging.getLogger(__name__)
@@ -202,6 +203,15 @@ class EpisodeDiscovery:
 
         Tries YouTube Data API first, then RSS fallback.
         """
+        if is_channel_blocked(
+            source_id=source.id,
+            channel_id=source.youtube_channel_id,
+            channel_url=source.youtube_channel_url,
+            channel_name=source.name,
+        ):
+            log.info("Source %s is blacklisted; skipping discovery.", source.id)
+            return []
+
         cutoff = datetime.now(timezone.utc) - timedelta(days=DISCOVERY_WINDOW_DAYS)
         episodes: list[PodcastEpisode] = []
 
@@ -318,6 +328,16 @@ class EpisodeDiscovery:
             duration_str = detail.get("contentDetails", {}).get("duration", "")
             duration_seconds = _parse_iso8601_duration(duration_str)
             channel_name = detail.get("snippet", {}).get("channelTitle") or source.name
+            title = snippet.get("title", "")
+            if is_channel_blocked(
+                source_id=source.id,
+                channel_id=source.youtube_channel_id,
+                channel_name=channel_name,
+                title=title,
+            ):
+                log.info("Ignoring blacklisted episode: %s - %s", video_id, title)
+                continue
+
             description = (
                 detail.get("snippet", {}).get("description")
                 or snippet.get("description", "")
@@ -445,6 +465,15 @@ class EpisodeDiscovery:
             summary = entry.get("summary", "")
             if "media_description" in entry:
                 summary = entry.media_description or summary
+
+            title = entry.get("title", "")
+            if is_channel_blocked(
+                source_id=source.id,
+                channel_name=source.name,
+                title=title,
+            ):
+                log.info("Ignoring blacklisted RSS episode: %s - %s", video_id, title)
+                continue
 
             ep = PodcastEpisode(
                 id=f"{source.id}:{video_id}",

@@ -373,7 +373,7 @@ class Store:
         with self.connect() as db:
             rows = db.execute(
                 f"SELECT * FROM podcast_episodes {where} "
-                "ORDER BY discovered_at DESC LIMIT ?",
+                "ORDER BY discovery_score DESC, discovered_at DESC LIMIT ?",
                 (*params, limit),
             ).fetchall()
         result = []

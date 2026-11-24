@@ -14,14 +14,14 @@
     <aside class="sidebar">
       <div class="brand">
         <span class="brand-icon yt-brand-badge" title="AutoYT Studio">
-          <svg viewBox="0 0 28 20" width="30" height="22" fill="currentColor">
-            <path fill="#ea4335" d="M27.4 3.1c-.3-1.2-1.3-2.1-2.5-2.4C22.7.2 14 .2 14 .2s-8.7 0-10.9.5C1.9 1 1 1.9.6 3.1 0 5.3 0 10 0 10s0 4.7.6 6.9c.3 1.2 1.3 2.1 2.5 2.4 2.2.5 10.9.5 10.9.5s8.7 0 10.9-.5c1.2-.3 2.1-1.2 2.5-2.4.6-2.2.6-6.9.6-6.9s0-4.7-.6-6.9z"/>
-            <path fill="#FFFFFF" d="M11.2 14.3l7.3-4.3-7.3-4.3v8.6z"/>
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+            <rect width="24" height="24" rx="6" fill="#ef4444" />
+            <polygon points="9,7 17,12 9,17" fill="#ffffff" />
           </svg>
         </span>
         <div class="brand-text">
           <h2>AutoYT <span class="yt-badge-tag">Studio</span></h2>
-          <p>Shorts &amp; Podcast Automation</p>
+          <p>Podcast Shorts Automation</p>
         </div>
       </div>
 
@@ -30,6 +30,11 @@
           <span class="nav-icon">✂️</span>
           <span>Clips Studio</span>
           <span id="badgeQueueCount" class="nav-badge">0</span>
+        </a>
+        <a href="#captionsStudio" class="nav-item" data-tab="captionsStudio">
+          <span class="nav-icon">📁</span>
+          <span>Upload &amp; Subtitle Video</span>
+          <span class="nav-badge" style="background:#ef4444;color:#fff;">UPLOAD</span>
         </a>
         <a href="#automationSchedule" class="nav-item" data-tab="automationSchedule">
           <span class="nav-icon">⏰</span>
@@ -69,11 +74,14 @@
         </div>
 
         <div class="topbar-actions">
-          <button id="autoClipBtn" class="btn btn-gradient" type="button" title="Automatically pick top-scored episode and generate clips">
-            <span>🤖</span> Auto-Clip Top Episode
+          <button id="topbarUploadVideoBtn" class="btn btn-primary" type="button" title="Upload local 60s video and burn subtitles">
+            📁 Upload 60s Video
+          </button>
+          <button id="autoClipBtn" class="btn btn-secondary" type="button" title="Automatically pick top-scored episode and generate clips">
+            ⚡ Auto-Clip Top Episode
           </button>
           <button id="refreshBtn" class="btn btn-secondary" type="button" title="Refresh all data">
-            <span>↻</span> Refresh
+            ↻ Refresh
           </button>
         </div>
       </header>
@@ -88,29 +96,29 @@
       <!-- METRICS BAR -->
       <section class="metrics-grid">
         <div class="metric-card">
-          <span class="metric-label">Discovered Episodes</span>
+          <span class="metric-label">Discovered</span>
           <strong id="statDiscovered" class="metric-value">0</strong>
-          <span class="metric-hint">Across configured shows</span>
+          <span class="metric-hint">Episodes scanned</span>
         </div>
         <div class="metric-card">
-          <span class="metric-label">Authorized Rights</span>
+          <span class="metric-label">Authorized</span>
           <strong id="statAuthorized" class="metric-value">0</strong>
-          <span class="metric-hint">Approved for clipping</span>
+          <span class="metric-hint">Ready for clipping</span>
         </div>
         <div class="metric-card">
-          <span class="metric-label">Shorts Generated</span>
+          <span class="metric-label">Generated</span>
           <strong id="statGenerated" class="metric-value">0</strong>
-          <span class="metric-hint">9:16 vertical videos</span>
+          <span class="metric-hint">9:16 vertical Shorts</span>
         </div>
         <div class="metric-card">
-          <span class="metric-label">Awaiting Review</span>
+          <span class="metric-label">In Review</span>
           <strong id="statAwaiting" class="metric-value highlight">0</strong>
-          <span class="metric-hint">Ready for approval</span>
+          <span class="metric-hint">Pending approval</span>
         </div>
         <div class="metric-card">
-          <span class="metric-label">Uploaded to YouTube</span>
+          <span class="metric-label">Uploaded</span>
           <strong id="statUploaded" class="metric-value success">0</strong>
-          <span class="metric-hint">Private review mode</span>
+          <span class="metric-hint">Published to YouTube</span>
         </div>
       </section>
 
@@ -140,9 +148,9 @@
       <section id="manualCreatorSection" class="card creator-card">
         <div class="card-header">
           <div>
-            <span class="card-tag">MANUAL OR AUTOMATED</span>
-            <h2>Instant Podcast / Video Clipper</h2>
-            <p>Paste any YouTube podcast or video URL to automatically transcribe, find viral moments, and generate 9:16 Shorts with Raj Shamani bold animated subtitles.</p>
+            <span class="card-tag">Instant Clipper</span>
+            <h2>Create New Shorts</h2>
+            <p>Paste any YouTube podcast or video URL to transcribe, detect viral moments, and render 9:16 vertical Shorts.</p>
           </div>
         </div>
 
@@ -155,10 +163,13 @@
                 <input id="videoUrlInput" type="url" required placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/..." autocomplete="off">
               </div>
               <div class="quick-samples">
-                <span class="quick-label">Quick load:</span>
-                <button type="button" class="sample-pill" data-url="https://www.youtube.com/watch?v=POGm7I_DmIo">🎙️ Prakhar Gupta</button>
-                <button type="button" class="sample-pill" data-url="https://www.youtube.com/watch?v=noaa5xU3PyU">⚡ Raj Shamani</button>
-                <button type="button" class="sample-pill" data-url="https://www.youtube.com/watch?v=dACbZkSH_UU">🔥 Ranveer Allahbadia</button>
+                <span class="quick-label">Try:</span>
+                <button type="button" class="sample-pill" data-url="https://www.youtube.com/watch?v=POGm7I_DmIo">Prakhar Gupta</button>
+                <button type="button" class="sample-pill" data-url="https://www.youtube.com/watch?v=noaa5xU3PyU">Raj Shamani</button>
+                <button type="button" class="sample-pill" data-url="https://www.youtube.com/watch?v=dACbZkSH_UU">Ranveer Allahbadia</button>
+                <button type="button" id="heroSwitchToUploadBtn" class="sample-pill" style="background:#27272a; color:#fff; border-color:#3f3f46; font-weight:600;">
+                  📁 Upload Local 60s Video Instead ➔
+                </button>
               </div>
             </div>
 
@@ -448,6 +459,199 @@
                 </div>
                 <span class="badge badge-success">Active 24/7</span>
               </div>
+            </div>
+          </div>
+        </div>
+      <!-- SECTION 5: CAPTIONS & SUBTITLES STUDIO -->
+      <section id="captionsStudioSection" class="content-section" hidden>
+        <div class="section-toolbar">
+          <div class="toolbar-left">
+            <h2>Reels &amp; Shorts Captions Studio</h2>
+            <p class="toolbar-hint">Upload your 60-second video to automatically transcribe and burn viral animated subtitles with creator fonts and styles</p>
+          </div>
+        </div>
+
+        <!-- UPLOAD & CONFIGURATION CARD -->
+        <div class="card captions-studio-card">
+          <div class="card-header">
+            <div>
+              <span class="card-tag">AI SUBTITLER</span>
+              <h3>Upload Video &amp; Choose Reel Style</h3>
+              <p>Supports vertical 9:16 Shorts/Reels (up to 60s, MP4/MOV/WEBM up to 200MB).</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <!-- Dropzone -->
+            <div id="videoDropZone" class="upload-dropzone" role="button" tabindex="0">
+              <input type="file" id="videoUploadInput" accept="video/mp4,video/quicktime,video/webm,video/x-m4v" style="display:none;">
+              <div class="dropzone-content" id="dropzonePrompt">
+                <span class="dropzone-icon" style="font-size: 42px; margin-bottom: 8px;">📁</span>
+                <h4 style="font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 4px;">Click Anywhere to Select Video File</h4>
+                <p style="font-size: 13px; color: var(--text-sub); margin-bottom: 12px;">Drag &amp; drop or click to browse (MP4, MOV, or WEBM up to 200MB, 60s)</p>
+                <button type="button" id="btnSelectVideo" class="btn btn-primary" style="padding: 9px 20px; font-weight: 600;">
+                  📁 Choose Video File from Computer
+                </button>
+              </div>
+              <div id="uploadFileInfo" class="upload-file-info" hidden>
+                <span class="file-icon">🎬</span>
+                <div class="file-details">
+                  <strong id="uploadFileName">filename.mp4</strong>
+                  <span id="uploadFileSize">0 MB</span>
+                </div>
+                <button type="button" id="btnChangeVideo" class="btn btn-secondary btn-sm">Change Video</button>
+              </div>
+            </div>
+
+            <!-- Configuration Grid -->
+            <div class="captions-options-grid">
+              <div class="input-group">
+                <label for="captionFontSelect">Font Choice (Viral Creators)</label>
+                <select id="captionFontSelect">
+                  <option value="Arial Black" selected>Arial Black (Hormozi Classic Heavy)</option>
+                  <option value="Montserrat">Montserrat ExtraBold (Modern Tech &amp; Lifestyle)</option>
+                  <option value="Bebas Neue">Bebas Neue (Tall Cinematic Condensed)</option>
+                  <option value="Anton">Anton (Bold Punchy Urban)</option>
+                  <option value="Poppins">Poppins Bold (Friendly Rounded Creator)</option>
+                  <option value="Rubik">Rubik Bold (Punchy Soft Rounded)</option>
+                  <option value="Impact">Impact (Classic Viral High-Contrast)</option>
+                  <option value="Segoe UI">Segoe UI Bold (Clean Minimal Sans)</option>
+                </select>
+                <span class="field-hint">The exact typography used across viral Instagram Reels &amp; Shorts</span>
+              </div>
+
+              <div class="input-group">
+                <label for="captionStyleSelect">Subtitle Style &amp; Animation</label>
+                <select id="captionStyleSelect">
+                  <option value="hormozi_yellow" selected>🔥 Hormozi Yellow Pop (Electric yellow active word + 115% zoom)</option>
+                  <option value="mrbeast_green">⚡ MrBeast Lime Pop (Vibrant lime green active word highlight)</option>
+                  <option value="neon_mint">💎 Neon Mint Glow (Electric mint/teal highlight on crisp white)</option>
+                  <option value="fire_red">🔴 Crimson Fire Pop (Fiery orange/red active word pop)</option>
+                  <option value="gold_luxury">👑 Devon Gold Luxury (Warm golden amber accent, documentary)</option>
+                  <option value="clean_minimal">🤍 Ali Abdaal Minimal (Clean white text, subtle shadow, natural case)</option>
+                </select>
+                <span class="field-hint">Word-by-word active timing with color pop and contrast border</span>
+              </div>
+
+              <div class="input-group">
+                <label for="captionPositionSelect">Vertical Position</label>
+                <select id="captionPositionSelect">
+                  <option value="middle" selected>Middle (Center of Screen — Best for Talking Heads)</option>
+                  <option value="bottom">Lower Third (Shorts UI Safe Area)</option>
+                  <option value="top">Upper Third (Top Hook Area)</option>
+                </select>
+                <span class="field-hint">Adjust placement based on your speaker's face</span>
+              </div>
+
+              <div class="input-group">
+                <label for="captionChunkSelect">Words Per Line (Pacing)</label>
+                <select id="captionChunkSelect">
+                  <option value="1">1 Word (Hyper-Rapid Single Word)</option>
+                  <option value="2">2 Words (Fast Paced)</option>
+                  <option value="3" selected>3 Words (Standard Viral Reel — Recommended)</option>
+                  <option value="4">4-5 Words (Sentence / Storytelling)</option>
+                </select>
+                <span class="field-hint">How many words appear on screen simultaneously</span>
+              </div>
+
+              <div class="input-group">
+                <label for="captionFontSizeSelect">Font Size</label>
+                <select id="captionFontSizeSelect">
+                  <option value="64">Medium (64px)</option>
+                  <option value="76" selected>Large (76px — Recommended)</option>
+                  <option value="88">Extra Large (88px — Heavy Impact)</option>
+                </select>
+                <span class="field-hint">Scaled for 1080x1920 mobile viewing</span>
+              </div>
+
+              <div class="input-group">
+                <label for="captionCaseSelect">Letter Casing</label>
+                <select id="captionCaseSelect">
+                  <option value="upper" selected>ALL UPPERCASE (Viral Standard)</option>
+                  <option value="title">Title Case (Every Word Capitalized)</option>
+                  <option value="original">Original Sentence Case</option>
+                </select>
+                <span class="field-hint">Case formatting applied to the transcribed words</span>
+              </div>
+            </div>
+
+            <!-- Submit Action -->
+            <div class="captions-action-row">
+              <button id="btnGenerateCaptions" type="button" class="btn btn-primary btn-lg" disabled>
+                <span>✨</span> Generate &amp; Burn Subtitles
+              </button>
+              <span id="captionProgressText" class="captions-progress-text"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- RESULT PREVIEW CARD -->
+        <div id="captionResultCard" class="card" hidden>
+          <div class="card-header">
+            <div>
+              <span class="badge badge-success">READY</span>
+              <h3>Subtitled Video Result</h3>
+              <p>Your video has been transcribed and rendered with animated subtitles.</p>
+            </div>
+            <div class="card-actions">
+              <a id="btnDownloadCaptionedVideo" class="btn btn-primary btn-sm" download="subtitled_video.mp4">
+                ⬇️ Download Video
+              </a>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="subtitled-result-grid">
+              <div class="result-player-col">
+                <video id="captionResultVideoPlayer" controls playsinline class="video-preview-player"></video>
+              </div>
+              <div class="result-details-col">
+                <div class="detail-group">
+                  <label>Applied Settings</label>
+                  <div class="detail-meta-box">
+                    <div>
+                      <span class="meta-label">Font</span>
+                      <strong id="resultFontUsed">Arial Black</strong>
+                    </div>
+                    <div>
+                      <span class="meta-label">Style</span>
+                      <strong id="resultStyleUsed">Hormozi Yellow Pop</strong>
+                    </div>
+                    <div>
+                      <span class="meta-label">Position</span>
+                      <strong id="resultPositionUsed">Middle Center</strong>
+                    </div>
+                    <div>
+                      <span class="meta-label">Words Count</span>
+                      <strong id="resultWordsCount">0 words</strong>
+                    </div>
+                  </div>
+                </div>
+                <div class="detail-group">
+                  <label>Fast Actions</label>
+                  <div class="actions-row">
+                    <a id="btnDownloadCaptionedVideoSecondary" class="btn btn-primary" download="subtitled_video.mp4">
+                      ⬇️ Download Subtitled Video
+                    </a>
+                    <button type="button" id="btnReapplyStyle" class="btn btn-secondary">
+                      🔄 Try Another Style
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RECENT SUBTITLED SHORTS HISTORY -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Recent Subtitled Shorts</h3>
+              <p>Past videos subtitled through Captions Studio</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="subtitlesHistoryList" class="clips-list">
+              <p class="table-loading">No uploaded shorts subtitled yet.</p>
             </div>
           </div>
         </div>

@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from .blacklist import is_channel_blocked
+
 log = logging.getLogger(__name__)
 
 # Default JSON override file (relative to cwd, same as other data/ paths in config.py)
@@ -169,14 +171,16 @@ class SourceRegistry:
         """Load built-in defaults then apply JSON file overrides."""
         for raw in _BUILTIN_DEFAULTS:
             src = PodcastSource.from_dict(raw)
-            self._sources[src.id] = src
+            if not is_channel_blocked(source_id=src.id, channel_id=src.youtube_channel_id, channel_url=src.youtube_channel_url, channel_name=src.name):
+                self._sources[src.id] = src
 
         if self._file.is_file():
             try:
                 data = json.loads(self._file.read_text(encoding="utf-8"))
                 for raw in data.get("sources", []):
                     src = PodcastSource.from_dict(raw)
-                    self._sources[src.id] = src  # Override or add
+                    if not is_channel_blocked(source_id=src.id, channel_id=src.youtube_channel_id, channel_url=src.youtube_channel_url, channel_name=src.name):
+                        self._sources[src.id] = src  # Override or add
                 log.debug("Loaded %d podcast sources from %s", len(data.get("sources", [])), self._file)
             except (json.JSONDecodeError, TypeError, KeyError) as exc:
                 log.warning("Could not parse podcast sources file %s: %s", self._file, exc)
@@ -218,6 +222,8 @@ class SourceRegistry:
 
     def add(self, source: PodcastSource, *, save: bool = True) -> None:
         """Add or replace a source; persists by default."""
+        if is_channel_blocked(source_id=source.id, channel_id=source.youtube_channel_id, channel_url=source.youtube_channel_url, channel_name=source.name):
+            raise ValueError(f"Channel '{source.name}' ({source.id}) is blacklisted by policy and cannot be added.")
         self._sources[source.id] = source
         if save:
             self._save()

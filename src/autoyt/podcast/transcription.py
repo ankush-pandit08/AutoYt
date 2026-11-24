@@ -3,9 +3,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import List, Optional
+
+# Prevent Intel MKL memory allocation exhaustion on Windows
+os.environ.setdefault("CT2_PACKED_GEMM", "0")
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 from .utils import clean_to_english_hinglish
 
@@ -128,22 +133,35 @@ class Transcriber:
         model = self._load_model()
         log.info("Starting transcription of %s...", audio_path)
 
-        import soundfile as sf
-        audio_data, sr = sf.read(str(audio_path), dtype="float32")
+        import numpy as np
+        import subprocess
+        from .utils import get_ffmpeg_binary
+        ffmpeg_bin = get_ffmpeg_binary()
+        proc = subprocess.Popen(
+            [ffmpeg_bin, "-v", "error", "-i", str(audio_path), "-f", "f32le", "-ac", "1", "-ar", "16000", "-"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        raw_pcm, _ = proc.communicate()
+        audio_data = np.frombuffer(raw_pcm, np.float32)
 
         # Transcribe with word timestamps enabled using loaded PCM float32 array
         # beam_size=1 provides 2.5x-3x speedup on CPU without quality loss for conversational audio
+        # condition_on_previous_text=False prevents repetitive hallucination loops and temperature fallback delays
         segments_gen, info = model.transcribe(
             audio_data,
             beam_size=1,
             word_timestamps=True,
             vad_filter=True,
             vad_parameters=dict(min_silence_duration_ms=500),
+            condition_on_previous_text=False,
             initial_prompt="Transcribe strictly in English and Romanized Hinglish using the Latin alphabet. Never output Urdu, Arabic, or foreign scripts.",
         )
 
         segments: List[TranscriptSegment] = []
         for i, seg in enumerate(segments_gen):
+            if i % 5 == 0 or seg.end >= getattr(info, "duration", 0.0) - 5:
+                log.info("Transcribed up to %.1fs / %.1fs (segment %d)", seg.end, getattr(info, "duration", 0.0), i + 1)
             words = []
             if seg.words:
                 for w in seg.words:
